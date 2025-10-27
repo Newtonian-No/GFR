@@ -25,6 +25,7 @@ from back.ROI import add_background_roi
 from back.overlay import display_dicom_with_roi_overlay
 from back.graph import graph
 from back.constants import LOCAL_DICOM_MODEL_PATH
+from back.constants import PROJECT_ROOT
 # MODEL_PATH_RELATIVE = 'weights/best_epoch_weights.pth'
 # DICOM_MODEL_PATH = PROJECT_ROOT / MODEL_PATH_RELATIVE
 # --- 模拟外部依赖模块 (用于使代码独立运行/测试) ---
