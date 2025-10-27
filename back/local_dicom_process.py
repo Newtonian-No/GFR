@@ -24,8 +24,18 @@ from back.predict import segment_kidney
 from back.ROI import add_background_roi
 from back.overlay import display_dicom_with_roi_overlay
 from back.graph import graph
-from back.constants import LOCAL_DICOM_MODEL_PATH
-from back.constants import PROJECT_ROOT
+from back.constants import (
+    LOCAL_DICOM_MODEL_PATH, 
+    OUTPUT_DIR, 
+    CONVERTED_OUTPUT_DIR, 
+    SEGMENTED_OUTPUT_DIR, 
+    GRAPH_OUTPUT_DIR,
+    UPLOAD_DIR,
+    DEPTH_OUTPUT_DIR,
+    ORIGINAL_CT_FILE_DIR,
+    ORIGINAL_CT_DIR,
+    ALL_OUTPUT_DIRS # 用于创建目录列表
+)
 # MODEL_PATH_RELATIVE = 'weights/best_epoch_weights.pth'
 # DICOM_MODEL_PATH = PROJECT_ROOT / MODEL_PATH_RELATIVE
 # --- 模拟外部依赖模块 (用于使代码独立运行/测试) ---
@@ -83,14 +93,11 @@ class DicomProcessor:
     封装DICOM处理、深度计算和GFR计算的类，管理内部状态。
     """
     
-    def __init__(self, upload_folder='uploads', converted_folder='converted', 
-                 segmented_folder='ROI', depth_folder='depth', base_url='http://localhost/'):
+    def __init__(self):
         # 路径配置
-        self.UPLOAD_FOLDER = upload_folder
-        self.CONVERTED_FOLDER = converted_folder
-        self.SEGMENTED_FOLDER = segmented_folder
-        self.DEPTH_FOLDER = depth_folder
-        self.BASE_URL = base_url
+        self.UPLOAD_FOLDER = str(UPLOAD_DIR) 
+        self.CONVERTED_FOLDER_NAME = 'converted' # 仅保留名称 (可选)
+        self.SEGMENTED_FOLDER_NAME = 'ROI'
         self.ALLOWED_EXTENSIONS = {'dcm'}
         
         # 全局状态变量
@@ -113,21 +120,14 @@ class DicomProcessor:
 
     def _create_required_directories(self):
         """创建处理DICOM文件所需的所有目录"""
-        # 保持与原代码目录结构一致，但简化实现
-        directories = [
-            self.UPLOAD_FOLDER,
-            os.path.join("output", self.CONVERTED_FOLDER),
-            self.CONVERTED_FOLDER,
-            os.path.join("output", self.SEGMENTED_FOLDER),
-            os.path.join("output", self.DEPTH_FOLDER),
-            "output/original_dcm", 
-            "output/resampled_dcm", 
-            "output/ROI", 
-            "ROI",
-            "output/segmentation"
-        ]
-        for directory in directories:
-            os.makedirs(directory, exist_ok=True)
+        # 使用 ALL_OUTPUT_DIRS 常量列表
+        for directory_path in ALL_OUTPUT_DIRS:
+            try:
+                # 优先使用 Pathlib
+                directory_path.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                # 兜底处理
+                os.makedirs(str(directory_path), exist_ok=True)
 
     
 
@@ -172,7 +172,7 @@ class DicomProcessor:
                 'manufacturer': 'N/A', 'date': 'N/A'
             }
 
-    def _process_kidney_dicom(self, dicom_path: str, frame_number: int = 61, model_path: str = LOCAL_DICOM_MODEL_PATH) -> Dict[str, Any]:
+    def _process_kidney_dicom(self, dicom_path: str, patient_name: str , frame_number: int = 61, model_path: str = LOCAL_DICOM_MODEL_PATH) -> Dict[str, Any]:
         """
         处理肾动态扫描DICOM图像，进行肾脏分割和分析
         
@@ -193,22 +193,34 @@ class DicomProcessor:
             print("检测到单帧DICOM，直接处理...")
             original_dcm_path = dicom_path
         
+        # 使用 CONVERTED_OUTPUT_DIR
+        png_filename = f"{patient_name}_{frame_number}_resampled.png" 
+        png_path_abs = str(CONVERTED_OUTPUT_DIR / png_filename) # 完整的绝对路径字符串
+
         print("步骤2: 重采样DICOM...")
-        resampled_dcm_path, _, png_path = resample_dicom(original_dcm_path, order=1)
+        resampled_dcm_path, _, png_path = resample_dicom(original_dcm_path, output_png_path=png_path_abs, order=1)
         # resampled_dcm_path = "output/resampled.dcm" # 模拟结果
         # png_path = os.path.join(self.CONVERTED_FOLDER, "image.png") # 模拟结果
         
         print("步骤3-4: 进行肾脏分割和ROI添加...")
+        overlay_filename = f"{patient_name}_roi_overlay.png"
+        overlay_path_abs = str(SEGMENTED_OUTPUT_DIR / overlay_filename)
         segmentation_path, _ = segment_kidney(resampled_dcm_path, model_path, img_size=224, num_classes=3)
         roi_path, roi_data = add_background_roi(segmentation_path)
         # segmentation_path = "output/segmentation/result.dcm" # 模拟结果
         # _, roi_data = add_background_roi(segmentation_path) # 模拟调用
         
-        overlay_path = display_dicom_with_roi_overlay(resampled_dcm_path, roi_data)
+        overlay_path = display_dicom_with_roi_overlay(resampled_dcm_path, roi_data, output_path=overlay_path_abs)
         # overlay_path = os.path.join(self.SEGMENTED_FOLDER, "overlay_image.png") # 模拟结果
         
         print("步骤5: 计算肾脏计数和生成曲线...")
-        left_kidney_count, right_kidney_count, left_background_count, right_background_count, graph_path = graph(dicom_path, roi_data)
+        graph_filename = f"{patient_name}_counts_curve.png"
+        graph_path_abs = str(GRAPH_OUTPUT_DIR / graph_filename)
+        left_kidney_count, right_kidney_count, left_background_count, right_background_count, graph_path = graph(
+            dicom_path, 
+            roi_data,
+            output_path=graph_path_abs # 传入绝对路径
+        )
         # left_kidney_count, right_kidney_count, left_background_count, right_background_count, graph_path = graph(dicom_path, roi_data) # 模拟调用
         
         print(f"左肾计数: {left_kidney_count}, 右肾计数: {right_kidney_count}")
@@ -221,9 +233,9 @@ class DicomProcessor:
         }
         
         return {
-            'png_path': os.path.join(self.BASE_URL, png_path),
-            'overlay_path': os.path.join(self.BASE_URL, overlay_path),
-            'graph_path': os.path.join(self.BASE_URL, graph_path),
+            'png_path': png_path,
+            'overlay_path': overlay_path,
+            'graph_path': graph_path, # 返回绝对路径
             'kidney_counts': kidney_counts
         }
 
@@ -249,7 +261,7 @@ class DicomProcessor:
             self.last_manufacturer = patient_info['manufacturer']
             
             # 3. 处理DICOM序列并进行肾脏分析
-            result = self._process_kidney_dicom(dicom_path)
+            result = self._process_kidney_dicom(dicom_path, patient_info['name'])
             
             # 4. 更新全局肾脏计数变量
             self.last_kidney_counts = result['kidney_counts']
@@ -365,7 +377,7 @@ class DicomProcessor:
 
     def process_depth_dicom(self, dicom_path: str) -> Dict[str, Any]:
         """
-        处理CT DICOM文件，进行模型深度计算和李氏公式深度计算。
+        处理单个CT DICOM文件，进行模型深度计算和李氏公式深度计算。
         
         参数:
             dicom_path: CT DICOM文件路径。
@@ -424,7 +436,11 @@ class DicomProcessor:
                 print(f"缺少计算李氏肾脏深度所需的患者信息: {', '.join(missing)}")
                 
             # 3. 模型计算肾脏深度 (单位mm)
-            result, viz_path = CT(dicom_path) # 假设 CT 函数返回 mm 单位的深度
+            patient_name_safe = current_patient_name if current_patient_name != 'N/A' else 'UNKNOWN'
+            viz_filename = f"{patient_name_safe}_depth_visualization.png"
+            viz_path_abs = str(DEPTH_OUTPUT_DIR / viz_filename) # 使用常量
+
+            result, viz_path = CT(dicom_path, output_path=viz_path_abs) # 假设 CT 函数返回 mm 单位的深度
             left_depth_model = result.get('L')
             right_depth_model = result.get('R')
 

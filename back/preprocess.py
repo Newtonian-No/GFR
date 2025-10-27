@@ -69,7 +69,7 @@ def extract_frame(file_path, frame_number):
         raise ValueError(f"帧索引{frame_number}超出范围[0, {image_data.shape[0]-1}]")
 
 # 步骤2: 对DICOM图像进行重采样
-def resample_dicom(input_path, order=1):
+def resample_dicom(input_path, output_png_path=None ,order=1):
     """对DICOM图像进行重采样以获得等间距像素"""
     print(f"步骤2: 对{input_path}进行重采样...")
     
@@ -162,12 +162,19 @@ def resample_dicom(input_path, order=1):
     enhancer = ImageEnhance.Contrast(image)
     image = enhancer.enhance(1.2)  # 增强因子1.2
     
-    # 保存高质量PNG
-    png_path = os.path.join("converted", f"{patient_name}_{frame_number}_resampled.png")
-    image.save(png_path, compress_level=0)
-    print(f"已保存重采样PNG图像到: {png_path}")
+    # 使用传入的 output_png_path
+    if output_png_path is None:
+        # 如果未传入，使用原有的相对路径作为备用（但不推荐）
+        png_path_to_save = os.path.join("converted", f"{patient_name}_{frame_number}_resampled.png")
+    else:
+        # 使用上层传入的绝对路径
+        png_path_to_save = output_png_path 
+        
+    image.save(png_path_to_save, compress_level=0)
+    print(f"已保存重采样PNG图像到: {png_path_to_save}")
     
-    return output_path, resampled_arr, png_path
+    # 返回实际保存的 PNG 路径
+    return output_path, resampled_arr, png_path_to_save
 
 def convert_and_display_dicom(dicom_path, custom_wc=None, custom_ww=None, enhance_contrast=True):
     """

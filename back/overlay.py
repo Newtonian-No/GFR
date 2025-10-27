@@ -70,8 +70,12 @@ def display_dicom_with_roi_overlay(dicom_image_path, segmentation_mask, output_p
     
     # 保存图像
     if output_path is None:
+        # 修改：如果没有提供路径，应该报错或使用一个绝对路径常量作为默认值
+        # 为保持健壮性，这里强制要求调用者传入路径，或者可以添加日志警告。
+        print("[警告] 未提供 output_path，将使用默认相对路径。")
         output_path = os.path.join("ROI", f"overlay_{os.path.basename(dicom_image_path).split('.')[0]}.png")
     
+    # 使用传入的 output_path (绝对路径)
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()  # 关闭图像，不显示
     

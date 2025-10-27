@@ -8,10 +8,16 @@ from back.detect import detect , detect_folder
 import os
 from back.anatomical_segmentation import kidneydepth ,find_deepest_slice
 
-def CT(file_path):
+def CT(file_path, output_path: str = None):
 
-    output_dir = r"depth" 
-    result_paths = detect(source=file_path) 
+    if output_path is None:
+        # 如果未传入，使用原有的相对路径作为备用（但不推荐）
+        output_dir = os.path.join("converted", f"{patient_name}_{frame_number}_resampled.png")
+    else:
+        # 使用上层传入的绝对路径
+        output_dir = output_path 
+
+    # result_paths = detect(source=file_path) 
                               
     # Debugging output
     print(f"Result paths: {result_paths}")

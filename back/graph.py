@@ -4,7 +4,7 @@ import pydicom
 import SimpleITK as sitk
 import os
 from scipy.ndimage.interpolation import zoom
-
+from typing import Optional, Tuple, List
 
 def calculate_kidney_pixel_sum(dicom_image, segmentation_mask, kidney_label):
     # 获取指定肾脏区域的二值掩膜
@@ -15,7 +15,7 @@ def calculate_kidney_pixel_sum(dicom_image, segmentation_mask, kidney_label):
     sum_pixel_values = np.sum(kidney_image)
     return sum_pixel_values
 
-def graph(dicom_path, ROI_data):
+def graph(dicom_path, ROI_data, output_path: Optional[str] = None) -> Tuple[float, float, float, float, str]:
     print(f"步骤6: 肾脏计数变化曲线...")
     # 读取原始dicom文件
     dicom_data = pydicom.dcmread(dicom_path)
@@ -113,14 +113,23 @@ def graph(dicom_path, ROI_data):
 
     # 添加标题和坐标标签
     if len(dicom_images.shape) > 2:
-        plt.title('Kidney', fontsize=16, color='black')
+        plt.title('Kidney Time-Activity Curve', fontsize=16, color='black')
         plt.xlabel('Minutes', fontsize=12)
         plt.ylabel('Counts/Second', fontsize=12)
         plt.legend()
 
-    base_name = os.path.basename(dicom_path)
-    name, ext = os.path.splitext(base_name)
-    output_file = os.path.join('ROI', f"counts_time_{name}.png")
+    if output_path is None:
+        # 如果没有提供 output_path，生成一个默认的绝对路径 (基于调用者预期的结构)
+        # 注意：在 DicomProcessor 中我们会传入绝对路径，这里的 None 分支只是作为保障
+        base_name = os.path.basename(dicom_path)
+        name, ext = os.path.splitext(base_name)
+        # 这里的相对路径 'ROI' 可能导致问题，最好在调用者端保证路径是绝对的
+        output_file = os.path.join('ROI', f"counts_time_{name}.png") 
+        print(f"[警告] graph 函数未提供 output_path，使用默认相对路径: {output_file}")
+    else:
+        # 使用传入的绝对路径
+        output_file = output_path
+
     plt.savefig(output_file, facecolor='lavender')  # 保存图像
     plt.close()  # 关闭图像以释放内存
 

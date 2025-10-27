@@ -1,0 +1,8 @@
+pyinstaller -D -c back/app.py --name GFR_App \
+    --collect-all back \
+    --collect-data ultralytics \
+    --add-data "back/weights:back/weights" \
+    --hidden-import "super_gradients" \
+    --hidden-import "shapely" \
+    --hidden-import "dill" \
+    --hidden-import "tabulate"
