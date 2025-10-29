@@ -14,7 +14,8 @@ MODEL_PATH_RELATIVE2 = 'back/weights/best.pt'
 DETECT_MODEL_WEIGHTS_PATH = PROJECT_ROOT / MODEL_PATH_RELATIVE2
 MODEL_PATH_RELATIVE3 = 'back/weights/best_epoch_weights.pth'
 LOCAL_DICOM_MODEL_PATH = PROJECT_ROOT / MODEL_PATH_RELATIVE3
-
+MODEL_PATH_RELATIVE4 = 'back/weights/best.pt'  #yolo13，这里还在用旧的
+DETECT_MODEL_WEIGHTS_PATH = PROJECT_ROOT / MODEL_PATH_RELATIVE4
 # 新增：定义所有关键的输出目录路径 (绝对路径)
 OUTPUT_DIR = PROJECT_ROOT / 'output'
 
@@ -24,12 +25,32 @@ SEGMENTED_OUTPUT_DIR = OUTPUT_DIR / 'ROI'       # 用于叠加图
 GRAPH_OUTPUT_DIR = OUTPUT_DIR  / 'curve'        # 用于曲线图
 
 # CT/深度相关输出目录
-DEPTH_OUTPUT_DIR = OUTPUT_DIR / 'depth'        
+DEPTH_OUTPUT_DIR = OUTPUT_DIR / 'depth'     
+SEG_DEPTH_OUTPUT_DIR = OUTPUT_DIR / 'seg_depth'   
 ORIGINAL_DCM_DIR = OUTPUT_DIR / 'original_dcm'
-ORIGINAL_CT_FILE_DIR = OUTPUT_DIR / 'original_ct_file' # 当传入CT文件夹时 用于保存原始CT文件
-ORIGINAL_CT_DIR = OUTPUT_DIR / 'original_ct' # 当传入CT文件时 用于保存原始CT文件    
 RESAMPLED_DCM_DIR = OUTPUT_DIR / 'resampled_dcm'
 SEGMENTATION_DIR = OUTPUT_DIR / 'segmentation'
+
+# 1. 原始 DICOM 文件存储 (备份/归档)
+ORIGINAL_CT_DIR = OUTPUT_DIR / 'original_dcm_backup'
+ORIGINAL_CT_DIR.mkdir(parents=True, exist_ok=True)
+
+# 2. 原始图片 PNG 路径 (用于前端展示原始切片)
+ORIGINAL_PNG_DIR = OUTPUT_DIR / 'original_png' 
+ORIGINAL_PNG_DIR.mkdir(parents=True, exist_ok=True)
+
+# 3. 深度分析可视化叠加图路径 (最终结果图)
+OVERLAY_PNG_DIR = OUTPUT_DIR / 'overlay_png' 
+OVERLAY_PNG_DIR.mkdir(parents=True, exist_ok=True)
+
+# 4. YOLO 标签文件存储路径 (YOLO TXT)
+YOLO_LABELS_DIR = OUTPUT_DIR / 'yolo_labels'
+YOLO_LABELS_DIR.mkdir(parents=True, exist_ok=True)
+
+# 5. 中间结果和 JSON 汇总 (每个切片的详细数据)
+ANALYSIS_RESULTS_DIR = OUTPUT_DIR / 'analysis_results'
+ANALYSIS_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
 
 # 上传目录
 UPLOAD_DIR = PROJECT_ROOT / 'uploads'
@@ -38,5 +59,5 @@ UPLOAD_DIR = PROJECT_ROOT / 'uploads'
 ALL_OUTPUT_DIRS = [
     OUTPUT_DIR, CONVERTED_OUTPUT_DIR, SEGMENTED_OUTPUT_DIR, GRAPH_OUTPUT_DIR,
     DEPTH_OUTPUT_DIR, ORIGINAL_DCM_DIR, RESAMPLED_DCM_DIR, SEGMENTATION_DIR,
-    UPLOAD_DIR, ORIGINAL_CT_FILE_DIR, ORIGINAL_CT_DIR
+    UPLOAD_DIR, ORIGINAL_CT_DIR
 ]

@@ -159,7 +159,7 @@ class DicomGFRApp:
                 self.log_message("  > 患者信息已更新。")
             if 'kidneyCounts' in result:
                 self.log_message("  > 肾脏计数已更新。")
-            if 'kidneyDepth' in result:
+            if 'leftDepth' in result or 'rightDepth' in result:
                 self.log_message("  > 肾脏深度信息已更新。")
 
             # --- 动态显像结果更新 (针对 DynamicStudyFrame) ---
@@ -170,6 +170,17 @@ class DicomGFRApp:
                     # 调用 DynamicStudyFrame 中新的更新方法
                     dynamic_frame.update_results(result) 
             # ------------------------------------
+            # +++ CT 深度结果更新 (针对 CTDepthFrame) +++
+            if task_name == "CT 深度计算" and (result.get('leftDepth') or result.get('rightDepth') or result.get('deepestSliceName') or result.get('originalPngPath')):
+                ct_depth_frame = self.frames["Feature2"]
+                if isinstance(ct_depth_frame, CTDepthFrame):
+                    # 调用 CTDepthFrame 中新的更新方法
+                    ct_depth_frame.update_results(result)
+            # +++ ---------------------------------- +++
+            # --- GFR 计算结果更新 ---
+            if task_name == "GFR 计算" and result.get('gfr'):
+                 self.log_message("计算结果:\n" + json.dumps(result.get('gfr', {}), indent=4, ensure_ascii=False))
+            # ------------------------
             
         else:
             self.log_message(f"[失败] {task_name} 失败。")
@@ -654,16 +665,39 @@ class DynamicStudyFrame(FeatureFrameBase):
 # -------------------------------------------------------------
 class CTDepthFrame(FeatureFrameBase):
     def __init__(self, parent, controller):
-        self.image_label = None        # 用于显示 CT 图像的 Label
+        self.image_labels = {}         # 必须先初始化，供 _create_result_panel 使用
+        self.image_label = None        # 用于显示 CT 图像的 Label (引用 self.image_labels['ct_slice'])
         self.depth_labels = {}         # 用于显示深度的 Label
         self.image_tk_references = {}  # 存储 PhotoImage 引用
+        self.image_display_size = (300, 300)
         super().__init__(parent, controller, "2. 处理 CT 深度计算")
+
+    def _create_result_panel(self, parent, title, key):
+        """创建用于显示图像的LabelFrame容器"""
+        frame = ttk.LabelFrame(parent, text=title, padding=5) 
+        
+        # LabelFrame 内部使用 Grid 布局，并让其可扩展
+        frame.grid_rowconfigure(0, weight=1)
+        frame.grid_columnconfigure(0, weight=1)
+        
+        # 图像显示区域 (Label) - 移除 width/height 属性
+        image_label = ttk.Label(frame, text="暂无图像\n(等待加载...)", 
+                                                anchor="center", 
+                                                justify=tk.CENTER,
+                                                background='#E0E0E0', 
+                                                relief=tk.SUNKEN)
+        
+        # 使用 grid 布局，并设置为 sticky='nsew' 填满 LabelFrame
+        image_label.grid(row=0, column=0, sticky='nsew', padx=5, pady=5) 
+        
+        self.image_labels[key] = image_label
+        return frame
 
     def create_widgets(self):
         
         # 路径选择 
-        self.create_path_selection(self.content_frame, is_folder_only=False)
-        
+        self.create_path_selection(self.content_frame) # <-- 沿用父类的 path_entry
+
         ttk.Label(self.content_frame, text="提示: 请选择 CT 序列所在的文件夹，或者单个包含深度信息的 DICOM 文件。", 
                   font=self.controller.log_font).pack(pady=(0, 20))
 
@@ -674,7 +708,7 @@ class CTDepthFrame(FeatureFrameBase):
         # 主要功能按钮
         ttk.Button(action_frame, 
                    text="开始处理 CT 深度", 
-                   command=lambda: self.controller.run_threaded_task(self.handle_convert_depth_dicom),
+                   command=lambda: self.controller.run_threaded_task(self.handle_convert_depth_dicom), # <--- 关键修改
                    style='Accent.TButton'
                    ).pack(side=tk.LEFT, padx=10, ipadx=20, ipady=10)
                    
@@ -683,107 +717,191 @@ class CTDepthFrame(FeatureFrameBase):
                    text="手动上传深度/患者信息", 
                    command=self.controller.show_upload_depth_dialog,
                    ).pack(side=tk.LEFT, padx=10, ipadx=10, ipady=10)
+
+        # --- 结果显示区 (2x2 Grid) ---
+        result_grid = ttk.Frame(self.content_frame)
+        result_grid.pack(fill='both', expand=True, padx=5, pady=5) 
         
-        # --- 结果显示区 ---
-        result_frame = ttk.Frame(self.content_frame)
-        result_frame.pack(fill='both', expand=True, padx=5, pady=5)
+        # 配置 Grid 权重，让所有区域都可扩展
+        result_grid.grid_rowconfigure(0, weight=1)
+        result_grid.grid_rowconfigure(1, weight=1)
+        result_grid.grid_columnconfigure(0, weight=1)
+        result_grid.grid_columnconfigure(1, weight=1)
+
+        # =================================================================
+        # 1. 左上: 肾脏 CT/最深切片 (原图像)
+        # =================================================================
+        self.original_image_frame = self._create_result_panel(result_grid, "肾脏 CT/最深切片 (原图)", 'original')
+        self.original_image_frame.grid(row=0, column=0, sticky='nsew', padx=5, pady=5) 
         
-        # 1. CT 图像显示面板 (左侧)
-        self.ct_image_frame = self._create_result_panel(result_frame, "肾脏 CT 切片", 'ct_slice')
-        self.ct_image_frame.pack(side=tk.LEFT, fill='both', expand=True, padx=5, pady=5)
-        self.image_label = self.image_labels.get('ct_slice') # 存储 Label 引用
+        # =================================================================
+        # 2. 右上: 叠加识别结果 (标注图像)
+        # =================================================================
+        # 假设处理器返回的标注图像键名为 'depthOverlayUrl' (需要 DicomProcessor 支持)
+        self.overlay_image_frame = self._create_result_panel(result_grid, "深度识别叠加结果 (标注图)", 'overlay')
+        self.overlay_image_frame.grid(row=0, column=1, sticky='nsew', padx=5, pady=5) 
 
-        # 2. 深度信息表格 (右侧)
-        self.depth_table_frame = self._create_depth_table_panel(result_frame)
-        self.depth_table_frame.pack(side=tk.LEFT, fill='both', expand=True, padx=5, pady=5)
+        # =================================================================
+        # 3. 左下: 深度测量结果面板 (文本)
+        # =================================================================
+        self.count_table_frame = self._create_count_table_panel(result_grid)
+        self.count_table_frame.grid(row=1, column=0, sticky='nsew', padx=5, pady=5) 
 
+        # =================================================================
+        # 4. 右下: 空白区域（留待扩展）
+        # =================================================================
+        empty_frame = ttk.LabelFrame(result_grid, text="其他信息/扩展模块", padding="10")
+        empty_frame.grid(row=1, column=1, sticky='nsew', padx=5, pady=5) 
+        ttk.Label(empty_frame, text="此区域暂时留空，可用于后续添加图像或数据展示。").pack(padx=10, pady=10)
+        
+        # 更新 self.image_label 的引用（现在它指向原图）
+        self.image_label = self.image_labels.get('ct_original')
 
-    # 核心处理逻辑
-    # 注意：这里两个处理方法返回文件路径还没改！！！
     def handle_convert_depth_dicom(self):
-        """处理 CT 图像 DICOM 深度计算 (线程目标函数)"""
+        """处理 CT 深度 DICOM 文件/文件夹 (线程目标函数)"""
         dicom_path = self.path_entry.get().strip()
         if not dicom_path or dicom_path == "请点击 '选择' 按钮":
             result = {'success': False, 'message': '文件路径不能为空'}
         else:
-            is_dir = os.path.isdir(dicom_path)
             try:
-                if is_dir:
-                    # 调用 DicomProcessor 的方法处理文件夹
-                    result = self.processor.process_depth_dicomfile(dicom_path)
-                else:
-                    # 调用 DicomProcessor 的方法处理单个文件
-                    result = self.processor.process_depth_dicom(dicom_path)
+                result = self.processor.process_depth_and_li_depth(dicom_path)
             except Exception as e:
                 result = {'success': False, 'message': f'处理时发生未捕获的异常: {e}'}
                 traceback.print_exc()
 
-        self.controller.master.after(0, self.controller.after_thread_completion, result, "CT 深度计算")
+        self.controller.master.after(0, self.controller.after_thread_completion, result, "CT 深度计算")        
+
 
     def update_results(self, result: Dict[str, Any]):
         """在处理完成后，在主线程中更新 CT 图像和深度表"""
-        
-        # 1. 更新 CT 图像
-        # 假设 DicomProcessor 返回的键名是 'ctSliceUrl' 或类似的
-        ct_image_path = result.get('ctSliceUrl') 
-        if self.image_label:
-             self._load_and_display_image(self.image_label, ct_image_path, 'ct_slice')
-        
-        # 2. 更新深度表
-        depths = result.get('kidneyDepth', {}) # 假设键名是 'kidneyDepth'
-        
-        # 映射键名到表格中的 Label key
-        depth_map = {
-            'leftDepth': 'left_depth',
-            'rightDepth': 'right_depth',
-            'LiLeftKidneyDepth': 'li_left',
-            'LiRightKidneyDepth': 'li_right',
+
+        print(result)
+        # --- 1. 更新图像占位符文本为文件路径 ---
+        image_map = {
+            'original': result.get('originalPngPath'),
+            'overlay': result.get('overlayPngPath')
         }
 
-        for source_key, label_key in depth_map.items():
-            value = depths.get(source_key)
-            label = self.depth_labels.get(label_key)
-            if label:
-                # 格式化显示，例如保留两位小数或显示 N/A
-                if isinstance(value, (int, float)):
-                    display_value = f"{value:.2f} mm"
-                else:
-                    display_value = "N/A"
+        self._load_and_display_image(self.image_labels['original'], image_map['original'], 'original')
+        self._load_and_display_image(self.image_labels['overlay'], image_map['overlay'], 'overlay')
+        
+        # 2. 更新深度表
+        result_map = {
+            'modelLeftDepth': '模型左肾深度',
+            'modelRightDepth': '模型右肾深度',
+            'LiLeftDepth': '李氏左肾深度',
+            'LiRightDepth': '李氏右肾深度'
+        }
 
-                label.config(text=display_value)
+        for key, label_widget in self.depth_labels.items():
+            value = result.get(key, "N/A")
+
+            # 格式化显示 (保留两位小数，单位 mm)
+            if isinstance(value, (int, float)):
+                # 确保格式化为两位小数
+                display_value = f"{value:.2f} mm"
+            else:
+                # 如果是 "N/A" 或其他非数字值，直接显示
+                display_value = str(value)
+
+            label_widget.config(text=display_value)
         
         self.controller.log_message("[系统提示] CT 图像和深度表已更新。")
 
-
-    # 创建深度表格面板
-    def _create_depth_table_panel(self, parent):
-        """创建用于显示肾脏深度信息的表格LabelFrame容器"""
-        frame = ttk.LabelFrame(parent, text="肾脏深度信息", padding=10)
+    def _load_and_display_image(self, label: ttk.Label, image_path: Optional[str], key: str):
+        """
+        加载图像文件，调整大小，并在指定的 Label 控件中显示。
+        依赖于 PIL/Pillow 库。
         
-        # 定义要显示的深度指标
-        depth_metrics = [
-            ("左肾 CT 深度:", 'left_depth'),
-            ("右肾 CT 深度:", 'right_depth'),
-            ("左肾 李氏深度:", 'li_left'),
-            ("右肾 李氏深度:", 'li_right'),
-        ]
-        
-        # 使用 Grid 布局创建表格
-        for i, (label_text, key) in enumerate(depth_metrics):
-            
-            # 指标名称 Label (第 0 列)
-            ttk.Label(frame, text=label_text, anchor='w', font=self.controller.app_font).grid(row=i, column=0, padx=10, pady=5, sticky='w')
-            
-            # 结果值 Label (第 1 列)
-            result_label = ttk.Label(frame, text="N/A", anchor='e', font=self.controller.button_font, foreground='#0078D7')
-            result_label.grid(row=i, column=1, padx=10, pady=5, sticky='e')
-            self.depth_labels[key] = result_label
+        参数:
+            label (ttk.Label): 目标 Tkinter Label 控件。
+            image_path (Optional[str]): 图像文件的绝对路径。
+            key (str): 用于在 self.image_tk_references 中存储引用的键名。
+        """
+        # 1. 检查文件是否存在
+        if not image_path or not os.path.exists(image_path):
+            label.config(image='', text="暂无图像\n(文件未找到)", background='#F2DEDE')
+            # 移除旧的引用，释放内存
+            self.image_tk_references.pop(key, None) 
+            return
 
-        # 确保第二列（值）可扩展
+        try:
+            # 1. 打开图像
+            img = Image.open(image_path)
+            
+            # 2. 调整图像尺寸以适应显示区域
+            
+            # 确保获取最新的尺寸
+            label.update_idletasks() 
+            # 获取 Label 控件当前的实际大小 (至少200x200作为最小尺寸保障)
+            width = max(label.winfo_width(), 200) 
+            height = max(label.winfo_height(), 200)
+            
+            # 使用 Image.resize 确保填满 Label，或者 Image.thumbnail 保持比例
+            # 推荐使用 thumbnail 保持比例，避免拉伸变形。
+            # 如果希望图片完全填充控件，牺牲长宽比，则使用 resize
+            
+            # 方案 1 (推荐): 保持比例缩放，并居中显示
+            img_w, img_h = img.size
+            
+            # 计算缩放因子，使图片能适应 Label 尺寸
+            ratio_w = width / img_w
+            ratio_h = height / img_h
+            
+            # 取较小的比例因子，确保图片完全可见
+            scale_factor = min(ratio_w, ratio_h) 
+            
+            new_w = int(img_w * scale_factor)
+            new_h = int(img_h * scale_factor)
+
+            # 缩放图片
+            img = img.resize((new_w, new_h), Image.LANCZOS)
+            
+            # 3. 创建 Tkinter PhotoImage 对象
+            tk_img = ImageTk.PhotoImage(img)
+            
+            # 4. 更新 Label 控件
+            # 确保 Label 对齐方式正确 (anchor='center' 通常就够了)
+            label.config(image=tk_img, text='', anchor='center')
+            
+            # 6. 存储引用以防止垃圾回收
+            self.image_tk_references[key] = tk_img
+            label.config(background='white') # 成功加载后，背景色设为白色
+            
+        except Exception as e:
+            # 7. 处理加载失败的情况
+            self.controller.log_message(f"[图像错误] 无法加载 {image_path}: {e}")
+            label.config(image='', text=f"图像加载失败:\n{Path(image_path).name}", background='#F2DEDE')
+
+
+    def _create_count_table_panel(self, parent):
+        """创建用于显示计数表的LabelFrame容器"""
+        frame = ttk.LabelFrame(parent, text="肾脏深度计算表", padding=10)
+        
+        # 使用 Grid 布局创建表头
+        ttk.Label(frame, text="指标", font=self.controller.button_font).grid(row=0, column=0, padx=10, pady=5, sticky='ew')
+        ttk.Label(frame, text="左肾", font=self.controller.button_font).grid(row=0, column=1, padx=10, pady=5, sticky='ew')
+        ttk.Label(frame, text="右肾", font=self.controller.button_font).grid(row=0, column=2, padx=10, pady=5, sticky='ew')
+        
+        # 第一行：视觉肾脏深度计数
+        ttk.Label(frame, text="肾脏深度计算").grid(row=1, column=0, padx=10, pady=5, sticky='w')
+        self.depth_labels['modelLeftDepth'] = ttk.Label(frame, text="N/A")
+        self.depth_labels['modelLeftDepth'].grid(row=1, column=1, padx=10, pady=5, sticky='e')
+        self.depth_labels['modelRightDepth'] = ttk.Label(frame, text="N/A")
+        self.depth_labels['modelRightDepth'].grid(row=1, column=2, padx=10, pady=5, sticky='e')
+
+        # 第二行：李氏计数
+        ttk.Label(frame, text="李氏肾脏深度计算").grid(row=2, column=0, padx=10, pady=5, sticky='w')
+        self.depth_labels['LiLeftDepth'] = ttk.Label(frame, text="N/A") 
+        self.depth_labels['LiLeftDepth'].grid(row=2, column=1, padx=10, pady=5, sticky='e')
+        self.depth_labels['LiRightDepth'] = ttk.Label(frame, text="N/A") 
+        self.depth_labels['LiRightDepth'].grid(row=2, column=2, padx=10, pady=5, sticky='e')
+        
+        # 确保列可扩展
         frame.grid_columnconfigure(1, weight=1)
+        frame.grid_columnconfigure(2, weight=1)
         
         return frame
-
 # -------------------------------------------------------------
 # 4. GFR 计算界面
 # -------------------------------------------------------------
@@ -863,6 +981,7 @@ if __name__ == "__main__":
         # 尝试使用现代主题，例如 'clam' 或 'alt'
         style.theme_use('clam') 
     except:
+        print("Failed to set ttk theme.")
         pass # 无法设置主题，使用默认样式
         
     app = DicomGFRApp(root)

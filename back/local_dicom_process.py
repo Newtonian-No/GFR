@@ -14,11 +14,11 @@ import pydicom
 import numpy as np
 import re
 import math
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple , Union
 from pathlib import Path
 import json
 # 假设这些模块已存在且能被导入
-from back.CT import CT, find_deepest_slice_in_series
+from back.CT.api import process_ct_input
 from back.preprocess import extract_frame, resample_dicom
 from back.predict import segment_kidney
 from back.ROI import add_background_roi
@@ -32,7 +32,6 @@ from back.constants import (
     GRAPH_OUTPUT_DIR,
     UPLOAD_DIR,
     DEPTH_OUTPUT_DIR,
-    ORIGINAL_CT_FILE_DIR,
     ORIGINAL_CT_DIR,
     ALL_OUTPUT_DIRS # 用于创建目录列表
 )
@@ -374,162 +373,90 @@ class DicomProcessor:
 
         return patient_height_cm, patient_weight_kg, patient_age_y, patient_sex_M_F, using_previous_info
 
-
-    def process_depth_dicom(self, dicom_path: str) -> Dict[str, Any]:
+    def process_depth_and_li_depth(self, dicom_input_path: Union[str, Path]) -> Dict[str, Any]:
         """
-        处理单个CT DICOM文件，进行模型深度计算和李氏公式深度计算。
-        
-        参数:
-            dicom_path: CT DICOM文件路径。
-            
-        返回:
-            Dict: 包含深度计算结果和图像路径的字典。
-        """
-        if not os.path.exists(dicom_path):
-            return {'success': False, 'message': f"路径不存在: {dicom_path}"}
-        
-        # final_dcm_path = dicom_path
-
-        # # 1. 检查输入是文件夹还是文件
-        # if os.path.isdir(dicom_path):
-        #     # 如果是文件夹，调用 find_deepest_kidney_slice
-        #     print(f"输入是文件夹，开始寻找最深切片...")
-            
-            
-        #     # 找到最深切片的 DICOM 文件路径
-        #     # 注意：find_deepest_kidney_slice 可能返回 (文件路径, 结果)
-        #     deepest_slice_result = find_deepest_kidney_slice(dicom_path, MODEL_PATH)
-            
-        #     # 假设 find_deepest_kidney_slice 返回第一个元素是最佳切片的完整路径
-        #     if deepest_slice_result and deepest_slice_result[1]:
-        #         dicom_path = os.path.join(dicom_path, deepest_slice_result[1])
-        #         print(f"找到最深切片: {final_dcm_path}")
-        #     else:
-        #         return {'success': False, 'message': f"从文件夹 {dicom_path} 中未找到包含肾脏的最深切片。"}
-            
-        try:
-            dicom_data = pydicom.dcmread(dicom_path)
-            # dicom_data.pixel_array # 原代码中读取但未使用的部分，此处省略
-            
-            # 1. 检查和更新患者姓名，决定是否清空历史深度
-            current_patient_name = str(dicom_data.get('PatientName', 'N/A')).upper().replace('^', '')
-            last_name_normalized = str(self.last_patient_name).upper().replace('^', '') if self.last_patient_name else None
-            
-            if last_name_normalized != current_patient_name:
-                print(f"检测到新患者: {current_patient_name}，重置肾脏深度信息")
-                self.kidney_depths = {k: None for k in self.kidney_depths}
-                self.last_patient_name = str(dicom_data.get('PatientName'))
-                
-            # 2. 获取人体测量数据并计算李氏深度
-            (height, weight, age, sex, using_previous_info) = self._get_patient_anthropometric_data(dicom_data)
-            
-            self.kidney_depths['LiLeftKidneyDepth'] = None
-            self.kidney_depths['LiRightKidneyDepth'] = None
-            
-            if all([height, weight, age, sex]):
-                Li_L, Li_R = self._calculate_li_depth(height, weight, age, sex)
-                self.kidney_depths['LiLeftKidneyDepth'] = Li_L
-                self.kidney_depths['LiRightKidneyDepth'] = Li_R
-                print(f"李氏深度计算完成 (使用动态显像数据: {using_previous_info})")
-            else:
-                missing = [k for k, v in zip(['身高', '体重', '年龄', '性别'], [height, weight, age, sex]) if v is None]
-                print(f"缺少计算李氏肾脏深度所需的患者信息: {', '.join(missing)}")
-                
-            # 3. 模型计算肾脏深度 (单位mm)
-            patient_name_safe = current_patient_name if current_patient_name != 'N/A' else 'UNKNOWN'
-            viz_filename = f"{patient_name_safe}_depth_visualization.png"
-            viz_path_abs = str(DEPTH_OUTPUT_DIR / viz_filename) # 使用常量
-
-            result, viz_path = CT(dicom_path, output_path=viz_path_abs) # 假设 CT 函数返回 mm 单位的深度
-            left_depth_model = result.get('L')
-            right_depth_model = result.get('R')
-
-            # 更新全局变量中的肾脏深度信息
-            if left_depth_model is not None and left_depth_model != 'N/A':
-                self.kidney_depths['leftDepth'] = round(float(left_depth_model), 2)
-            if right_depth_model is not None and right_depth_model != 'N/A':
-                self.kidney_depths['rightDepth'] = round(float(right_depth_model), 2)
-
-            # 4. 构建返回结果
-            kidneyDepth = {k: self.kidney_depths[k] for k in self.kidney_depths}
-            
-            if kidneyDepth['leftDepth'] is None and kidneyDepth['rightDepth'] is None:
-                return {'success': False, 'message': '未检测到肾脏深度，请检查CT图像。'}
-            else:
-                message_parts = []
-                if kidneyDepth['leftDepth'] is not None and kidneyDepth['rightDepth'] is not None:
-                    message_parts.append("已检测到双侧肾脏深度")
-                elif kidneyDepth['leftDepth'] is not None:
-                    message_parts.append("只检测到左肾深度")
-                elif kidneyDepth['rightDepth'] is not None:
-                    message_parts.append("只检测到右肾深度")
-                    
-                if kidneyDepth['LiLeftKidneyDepth'] is not None and kidneyDepth['LiRightKidneyDepth'] is not None:
-                    source = "肾动态显像" if using_previous_info else "当前CT图像"
-                    message_parts.append(f"已使用{source}数据计算李氏深度")
-                
-                return {
-                    'success': True, 
-                    'depthImageUrl': os.path.join(self.BASE_URL, viz_path), 
-                    'message': "，".join(message_parts) + "。",
-                    'kidneyDepth': kidneyDepth,
-                    'usingDynamicPatientInfo': using_previous_info
-                }
-
-        except Exception as e:
-            print(f"处理CT DICOM文件时发生错误: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return {'success': False, 'message': f'处理CT DICOM文件时发生错误: {str(e)}'}
-
-    def process_depth_dicomfile(self, dcm_folder_path: str) -> Dict[str, Any]:
-        """
-        处理整个CT DICOM文件夹，找到肾脏深度最大的切片，并保存深度值。
+        【CTDepthFrame 调用函数】
+        同时计算模型肾脏深度和李氏深度，并返回所有结果和文件路径。
         
         Args:
-            dcm_folder_path (str): 包含CT DICOM文件的文件夹路径。
-
+            dicom_input_path: CT DICOM 文件或文件夹的路径。
+            
         Returns:
-            Dict: 包含处理结果和最深切片深度信息的字典。
+            Dict[str, Any]: 包含模型深度、李氏深度、患者信息和可视化路径的字典。
         """
-        print(f"开始处理 CT 序列文件夹: {dcm_folder_path}")
+        input_path = Path(dicom_input_path)
         
-        try:
-            # 调用 CT.py 中封装的函数来遍历文件夹并找到最深切片
-            # 所有的中间结果（YOLO标签、深度计算）将保存在一个临时目录
-            output_dir = "depth_series_analysis" # 或使用一个动态的路径
+        # 1. 调用 process_ct_input 获取模型深度和路径信息 (已处理文件复制和标准化路径)
+        # 假设 process_ct_input 已被正确导入
+        model_depth_result = process_ct_input(input_path)
+        
+        if not model_depth_result['success']:
+            # 如果模型深度计算失败，直接返回失败信息
+            return model_depth_result
             
-            # 替换 find_deepest_kidney_slice 的功能
-            deepest_result = find_deepest_slice_in_series(dcm_folder_path, output_dir)
-            
-            deepest_slice_filename = deepest_result.get('deepest_slice')
-            
-            # 调用 process_depth_dicom 处理最深切片
-            if deepest_slice_filename:
-                # ------------------- 关键修改 -------------------
-                # 拼接待处理文件的完整路径
-                deepest_slice_full_path = os.path.join(dcm_folder_path, deepest_slice_filename)
-                
-                # 调用 process_depth_dicom 处理完整路径
-                result = self.process_depth_dicom(deepest_slice_full_path) 
-                # ------------------------------------------------
-            else:
-                return {
-                    'success': False,
-                    'message': '未找到有效的肾脏切片或深度信息。',
-                    'kidneyDepth': self.kidney_depths
-                }
-            
-            # 返回 process_depth_dicom 的结果
-            return result
+        # 2. 确定用于提取 DICOM 元数据的路径
+        # process_ct_input 的结果中，'originalDicomPath' 总是指向最深切片 (系列) 或原始文件 (单文件) 的备份路径
+        target_dcm_path = model_depth_result.get('originalDicomPath')
+        
+        li_depth_L = "N/A"
+        li_depth_R = "N/A"
+        patient_info = {}
 
-        except Exception as e:
-            print(f"处理 CT 序列时发生错误: {e}")
-            return {
-                'success': False,
-                'message': f'处理 CT 序列时发生错误: {e}',
-                'kidneyDepth': self.kidney_depths
-            }
+        if target_dcm_path and Path(target_dcm_path).exists():
+            try:
+                # 读取 DICOM 元数据
+                ds = pydicom.dcmread(target_dcm_path, force=True)
+                
+                # 3. 提取患者人体测量数据
+                height, weight, age, sex, used_previous = self._get_patient_anthropometric_data(ds)
+                
+                # 4. 尝试计算李氏深度
+                if all(v is not None for v in [height, weight, age, sex]):
+                    li_L, li_R = self._calculate_li_depth(height, weight, age, sex)
+                    li_depth_L = li_L if li_L is not None else "N/A"
+                    li_depth_R = li_R if li_R is not None else "N/A"
+                else:
+                    print("警告: 缺少关键人体测量数据，无法计算李氏深度。")
+                    
+                # 将格式化后的患者信息添加到结果中
+                patient_info = self.last_patient_info 
+
+            except Exception as e:
+                print(f"李氏深度计算/DICOM读取失败: {e}")
+                # 即使李氏深度失败，也应返回模型深度结果
+        
+        # 5. 整合最终结果
+        final_result = {
+            'success': True,
+            # 模型深度结果 (字段名统一为 model/Li 前缀)
+            'modelLeftDepth': model_depth_result.get('leftDepth', 'N/A'),
+            'modelRightDepth': model_depth_result.get('rightDepth', 'N/A'),
+            # 李氏深度结果
+            'LiLeftDepth': li_depth_L,
+            'LiRightDepth': li_depth_R,
+            # 患者信息
+            'patientInfo': patient_info,
+            # 路径信息 (来自 process_ct_input)
+            'originalPngPath': model_depth_result.get('originalPngPath'),
+            'overlayPngPath': model_depth_result.get('overlayPngPath'),
+            'originalDicomPath': model_depth_result.get('originalDicomPath'),
+        }
+        
+        # 附加系列特有信息
+        if 'deepestSliceName' in model_depth_result:
+             final_result['deepestSliceName'] = model_depth_result.get('deepestSliceName')
+             final_result['maxOverallDepthMm'] = model_depth_result.get('maxOverallDepthMm')
+
+        # 6. 更新 DicomProcessor 的内部状态 (供 GFR 计算使用)
+        # 将模型深度存入内部状态，供 calculate_gfr 使用
+        self.kidney_depths['leftDepth'] = final_result['modelLeftDepth']
+        self.kidney_depths['rightDepth'] = final_result['modelRightDepth']
+        self.kidney_depths['LiLeftKidneyDepth'] = final_result['LiLeftDepth']
+        self.kidney_depths['LiRightKidneyDepth'] = final_result['LiRightDepth']
+
+        return final_result
+
+    
         
     def upload_depth_and_calculate_li(self, left_depth: Optional[float], right_depth: Optional[float], 
                                      height_m: float, weight_kg: float, age_y: int, sex_cn: str) -> Dict[str, Any]:
@@ -580,6 +507,60 @@ class DicomProcessor:
         else:
             return {'success': False, 'message': '无法计算李氏肾脏深度'}
 
+    def upload_depth_and_calculate_li(self) -> Dict[str, Any]:
+        """
+        计算李氏深度并上传/保存最终结果。
+        此方法不接受参数，它直接使用 DicomProcessor 的内部状态。
+        """
+        
+        # 1. 初始化结果字典
+        upload_result = {'success': False, 'message': '未执行任何操作'}
+        
+        # 2. 尝试计算李氏深度 (前提是 CT 深度和患者信息均可用)
+        height = self.last_patient_info.get('height') # 假设单位是米 (m)
+        weight = self.last_patient_info.get('weight') # 假设单位是千克 (kg)
+        age = self.last_patient_info.get('age')
+        sex = self.last_patient_info.get('sex')
+        
+        ct_L = self.kidney_depths.get('leftDepth')
+        ct_R = self.kidney_depths.get('rightDepth')
+        
+        is_patient_info_valid = all([height, weight, age is not None, sex])
+        
+        if is_patient_info_valid and isinstance(ct_L, (int, float)) and isinstance(ct_R, (int, float)):
+            
+            # 确保将身高转换为 _calculate_li_depth 所需的单位 (假设是 cm)
+            height_cm = height * 100 
+            
+            Li_L, Li_R = self._calculate_li_depth(
+                height_cm,
+                weight,
+                age,
+                sex
+            )
+            self.kidney_depths['LiLeftKidneyDepth'] = Li_L
+            self.kidney_depths['LiRightKidneyDepth'] = Li_R
+            
+            upload_result['LiDepthMessage'] = f"李氏深度计算完成，左肾:{Li_L:.2f}mm, 右肾:{Li_R:.2f}mm"
+        else:
+            upload_result['LiDepthMessage'] = "患者信息或 CT 深度缺失，跳过李氏深度计算。"
+        
+        # 3. 数据上传/持久化 (此处为您具体的业务逻辑)
+        try:
+            # 示例：将所有深度结果 (kidney_depths) 和患者信息上传/保存
+            # 例如：self._save_depth_results_to_db(self.last_patient_info, self.kidney_depths)
+            
+            upload_result['success'] = True
+            upload_result['message'] = "深度数据处理和上传成功。"
+            # 返回完整的深度数据，用于 GUI 更新
+            upload_result['kidneyDepth'] = self.kidney_depths 
+            
+        except Exception as e:
+            upload_result['success'] = False
+            upload_result['message'] = f"深度数据上传/保存失败: {e}"
+        
+        return upload_result
+    
     def calculate_gfr(self, depth_method: str = 'model') -> Dict[str, Any]:
         """
         计算 GFR。
