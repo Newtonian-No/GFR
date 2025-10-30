@@ -424,7 +424,7 @@ class FeatureFrameBase(ttk.Frame):
         """打开文件对话框选择 DICOM 文件"""
         filepath = filedialog.askopenfilename(
             title="选择 DICOM 文件",
-            filetypes=[("DICOM Files", "*.dcm;*.dicom"), ("All Files", "*.*")]
+            # filetypes=[("DICOM Files", "*.dcm;*.dicom"), ("All Files", "*.*")]
         )
         if filepath and self.path_entry:
             self.path_entry.delete(0, tk.END)
