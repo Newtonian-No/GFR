@@ -33,21 +33,22 @@ jobs:
     - name: Run PyInstaller Build
       shell: bash # 在 Windows Runner 上使用 Git Bash/WSL shell 执行，以便兼容 Linux 风格的打包命令
       run: |
-        # ⚠️ 注意：这里是您最终修正后的打包命令
-        # 路径分隔符在 Windows Runner 上通常会自动处理
-        pyinstaller -D -c better_app.py --name GFR_App \
-            --collect-all back \
-            --collect-all pillow \
-            --collect-data ultralytics \
-            --add-data "back/weights:back/weights" \
-            --add-data "back/CT:back/CT" \
-            --hidden-import "super_gradients" \
-            --hidden-import "shapely" \
-            --hidden-import "dill" \
-            --hidden-import "tabulate" \
-            --hidden-import "PIL._imagingtk" \
-            --hidden-import "PIL._imaging" \
-            --hidden-import "PIL._tkinter_finder"
+        pyinstaller -D -w back/better_app.py --name GFR_App \
+          --collect-all back \
+          --collect-data ultralytics \
+          --add-data "back/weights:back/weights" \
+          --add-data "back/CT:back/CT" \
+          --add-data "back/networks:back/networks" \
+          --hidden-import "super_gradients" \
+          --hidden-import "shapely" \
+          --hidden-import "dill" \
+          --hidden-import "tabulate"\
+          --collect-all pillow \
+          --hidden-import "PIL._imaging" \
+          --hidden-import "PIL._imagingtk" \
+          --hidden-import "PIL._tkinter_finder"\
+          --hidden-import "PIL.Image" \
+          --hidden-import "PIL.PngImagePlugin"
             
     - name: Prepare Artifact
       shell: bash
