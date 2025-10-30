@@ -458,7 +458,7 @@ class DicomProcessor:
 
     
         
-    def upload_depth_and_calculate_li(self, left_depth: Optional[float], right_depth: Optional[float], 
+    def manual_upload_depth_and_calculate_li(self, left_depth: Optional[float], right_depth: Optional[float], 
                                      height_m: float, weight_kg: float, age_y: int, sex_cn: str) -> Dict[str, Any]:
         """
         手动上传肾脏深度和患者信息，并计算李氏肾脏深度。

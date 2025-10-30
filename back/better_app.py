@@ -245,10 +245,10 @@ class DicomGFRApp:
         fields = [
             ("左肾深度 (mm) (可选):", "leftDepth", self.processor.kidney_depths.get('leftDepth')),
             ("右肾深度 (mm) (可选):", "rightDepth", self.processor.kidney_depths.get('rightDepth')),
-            ("身高 (米, e.g. 1.75):", "height"),
-            ("体重 (公斤, e.g. 70.0):", "weight"),
-            ("年龄 (岁, e.g. 50):", "age"),
-            ("性别 ('男'/'女'):", "sex")
+            ("身高 (米, e.g. 1.75):", "height", None),
+            ("体重 (公斤, e.g. 70.0):", "weight", None),
+            ("年龄 (岁, e.g. 50):", "age", None),
+            ("性别 ('男'/'女'):", "sex", None)
         ]
         self.depth_entries = {} 
         
@@ -310,7 +310,7 @@ class DicomGFRApp:
                  messagebox.showerror("输入错误", "请检查身高、体重、年龄、性别是否都已输入且性别为 ('男'/'女')。")
                  return
             
-            result = self.processor.upload_depth_and_calculate_li(
+            result = self.processor.manual_upload_depth_and_calculate_li(
                 left_depth=left_depth, right_depth=right_depth, 
                 height_m=float(height), weight_kg=float(weight), age_y=int(age), sex_cn=sex
             )
