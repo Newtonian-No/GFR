@@ -36,9 +36,9 @@ jobs:
         pyinstaller -D -w back/better_app.py --name GFR_App \
           --collect-all back \
           --collect-data ultralytics \
-          --add-data "back/weights:back/weights" \
-          --add-data "back/CT:back/CT" \
-          --add-data "back/networks:back/networks" \
+          --add-data "./back/weights:back/weights" \
+          --add-data "./back/CT:back/CT" \
+          --add-data "./back/networks:back/networks" \
           --hidden-import "super_gradients" \
           --hidden-import "shapely" \
           --hidden-import "dill" \
