@@ -7,8 +7,6 @@ backend_code.tar.gz
 *.jpg
 *.dcm
 *.nii.gz
-*.pth
-*.pt
 *.tar.gz
 *.zip
 train_find/extracted/
