@@ -8,5 +8,9 @@ pyinstaller -D -c back/better_app.py --name GFR_App \
     --hidden-import "shapely" \
     --hidden-import "dill" \
     --hidden-import "tabulate"\
+    --collect-all pillow \
     --hidden-import "PIL._imaging" \
-    --hidden-import "PIL._webp"
+    --hidden-import "PIL._imagingtk" \
+    --hidden-import "PIL._tkinter_finder"\
+    --hidden-import "PIL.Image" \
+    --hidden-import "PIL.PngImagePlugin"

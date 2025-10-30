@@ -597,73 +597,64 @@ class DynamicStudyFrame(FeatureFrameBase):
         
         self.controller.log_message("[系统提示] 图像路径和计数表已更新。")
 
-    def _load_and_display_image(self, label: ttk.Label, image_path: Optional[str], key: str):
-        """
-        加载图像文件，调整大小，并在指定的 Label 控件中显示。
-        依赖于 PIL/Pillow 库。
+    def _load_and_display_image(self, label: ttk.Label, image_path: Optional[str], key: str, size=(300, 300)):
+        """加载、调整大小并显示图像，同时进行详细调试和引用持久化。"""
         
-        参数:
-            label (ttk.Label): 目标 Tkinter Label 控件。
-            image_path (Optional[str]): 图像文件的绝对路径。
-            key (str): 用于在 self.image_tk_references 中存储引用的键名。
-        """
-        # 1. 检查文件是否存在
-        if not image_path or not os.path.exists(image_path):
-            label.config(image='', text="暂无图像\n(文件未找到)", background='#F2DEDE')
-            # 移除旧的引用，释放内存
-            self.image_tk_references.pop(key, None) 
+        # 调试点 1: 函数开始及参数检查
+        self.controller.log_message(f"[DEBUG-IMAGE] 开始加载 key='{key}' 的图像.")
+        
+        # ------------------- 路径和文件检查 -------------------
+        if not image_path:
+            self.controller.log_message(f"[DEBUG-IMAGE] 路径为空，key='{key}' 图像加载终止.")
+            label.config(image='')
+            label.image = None
             return
 
+        if not os.path.exists(image_path):
+            abs_path = os.path.abspath(image_path)
+            self.controller.log_message(f"[ERROR-IMAGE] 图像文件不存在! Key='{key}'. 尝试路径: {abs_path}")
+            label.config(image='')
+            label.image = None
+            return
+
+        # 调试点 2: 确认文件存在
+        self.controller.log_message(f"[DEBUG-IMAGE] 图像文件存在. 绝对路径: {os.path.abspath(image_path)}")
+        
+        # ------------------- 图像加载和处理 -------------------
         try:
-            # 1. 打开图像
-            print(f"加载图像: {image_path}") # 调试信息，确认路径正确
-            img = Image.open(image_path)
-            
-            # 2. 调整图像尺寸以适应显示区域
-            
-            # 确保获取最新的尺寸
-            label.update_idletasks() 
-            # 获取 Label 控件当前的实际大小 (至少200x200作为最小尺寸保障)
-            width = max(label.winfo_width(), 200) 
-            height = max(label.winfo_height(), 200)
-            
-            # 使用 Image.resize 确保填满 Label，或者 Image.thumbnail 保持比例
-            # 推荐使用 thumbnail 保持比例，避免拉伸变形。
-            # 如果希望图片完全填充控件，牺牲长宽比，则使用 resize
-            
-            # 方案 1 (推荐): 保持比例缩放，并居中显示
-            img_w, img_h = img.size
-            
-            # 计算缩放因子，使图片能适应 Label 尺寸
-            ratio_w = width / img_w
-            ratio_h = height / img_h
-            
-            # 取较小的比例因子，确保图片完全可见
-            scale_factor = min(ratio_w, ratio_h) 
-            
-            new_w = int(img_w * scale_factor)
-            new_h = int(img_h * scale_factor)
+            # 调试点 3: 尝试打开图像 (最可能失败的地方 1: Pillow插件缺失/损坏)
+            image = Image.open(image_path)
+            self.controller.log_message(f"[DEBUG-IMAGE] 成功打开图像. 原始尺寸: {image.size}")
 
-            # 缩放图片
-            img = img.resize((new_w, new_h), Image.LANCZOS)
+            # 调整尺寸
+            image = image.resize(size, Image.Resampling.LANCZOS)
+            self.controller.log_message(f"[DEBUG-IMAGE] 尺寸调整到: {size}")
             
-            # 3. 创建 Tkinter PhotoImage 对象
-            tk_img = ImageTk.PhotoImage(img)
+            # 调试点 4: 尝试创建 PhotoImage (最可能失败的地方 2: PhotoImage转换失败)
+            tk_image = ImageTk.PhotoImage(image)
+            self.controller.log_message(f"[DEBUG-IMAGE] 成功创建 ImageTk.PhotoImage 对象.")
+            
+            # ------------------- 持久化和显示 -------------------
+            # 关键步骤 1: 将引用存储在实例字典中 (防止 GC)
+            self.image_tk_references[key] = tk_image 
+            self.controller.log_message(f"[DEBUG-IMAGE] PhotoImage 引用已存储到 self.image_tk_references['{key}'].")
+            
+            # 关键步骤 2: 更新 Label 配置
+            label.config(image=self.image_tk_references[key])
+            
+            # 关键步骤 3: 附加到 Label 控件 (双重保险)
+            label.image = self.image_tk_references[key] 
+            
+            self.controller.log_message(f"[UI] 图像显示成功. Key='{key}'.")
 
-            self.image_tk_references[key] = tk_img
-            
-            # 4. 更新 Label 控件
-            # 确保 Label 对齐方式正确 (anchor='center' 通常就够了)
-            label.config(image=self.image_tk_references[key], text='', anchor='center')
-            
-            # 6. 存储引用以防止垃圾回收
-            label.image = self.image_tk_references[key]
-            label.config(background='white') # 成功加载后，背景色设为白色
-            
         except Exception as e:
-            # 7. 处理加载失败的情况
-            self.controller.log_message(f"[图像错误] 无法加载 {image_path}: {e}")
-            label.config(image='', text=f"图像加载失败:\n{Path(image_path).name}", background='#F2DEDE')
+            # 调试点 5: 捕获所有图像处理和显示失败的异常
+            self.controller.log_message(f"[FATAL-IMAGE] 图像处理或显示失败! Key='{key}'. 错误: {e}")
+            traceback.print_exc()
+            
+            # 失败后清空 Label
+            label.config(image='')
+            label.image = None
 
 # -------------------------------------------------------------
 # 2. CT 深度计算界面
@@ -813,73 +804,64 @@ class CTDepthFrame(FeatureFrameBase):
         
         self.controller.log_message("[系统提示] CT 图像和深度表已更新。")
 
-    def _load_and_display_image(self, label: ttk.Label, image_path: Optional[str], key: str):
-        """
-        加载图像文件，调整大小，并在指定的 Label 控件中显示。
-        依赖于 PIL/Pillow 库。
+    def _load_and_display_image(self, label: ttk.Label, image_path: Optional[str], key: str, size=(300, 300)):
+        """加载、调整大小并显示图像，同时进行详细调试和引用持久化。"""
         
-        参数:
-            label (ttk.Label): 目标 Tkinter Label 控件。
-            image_path (Optional[str]): 图像文件的绝对路径。
-            key (str): 用于在 self.image_tk_references 中存储引用的键名。
-        """
-        # 1. 检查文件是否存在
-        if not image_path or not os.path.exists(image_path):
-            label.config(image='', text="暂无图像\n(文件未找到)", background='#F2DEDE')
-            # 移除旧的引用，释放内存
-            self.image_tk_references.pop(key, None) 
+        # 调试点 1: 函数开始及参数检查
+        self.controller.log_message(f"[DEBUG-IMAGE] 开始加载 key='{key}' 的图像.")
+        
+        # ------------------- 路径和文件检查 -------------------
+        if not image_path:
+            self.controller.log_message(f"[DEBUG-IMAGE] 路径为空，key='{key}' 图像加载终止.")
+            label.config(image='')
+            label.image = None
             return
 
+        if not os.path.exists(image_path):
+            abs_path = os.path.abspath(image_path)
+            self.controller.log_message(f"[ERROR-IMAGE] 图像文件不存在! Key='{key}'. 尝试路径: {abs_path}")
+            label.config(image='')
+            label.image = None
+            return
+
+        # 调试点 2: 确认文件存在
+        self.controller.log_message(f"[DEBUG-IMAGE] 图像文件存在. 绝对路径: {os.path.abspath(image_path)}")
+        
+        # ------------------- 图像加载和处理 -------------------
         try:
-            # 1. 打开图像
-            print(f"DEBUG: 加载图像: {image_path}") # 调试信息，确认路径正确
-            img = Image.open(image_path)
-            
-            # 2. 调整图像尺寸以适应显示区域
-            
-            # 确保获取最新的尺寸
-            label.update_idletasks() 
-            # 获取 Label 控件当前的实际大小 (至少200x200作为最小尺寸保障)
-            width = max(label.winfo_width(), 200) 
-            height = max(label.winfo_height(), 200)
-            
-            # 使用 Image.resize 确保填满 Label，或者 Image.thumbnail 保持比例
-            # 推荐使用 thumbnail 保持比例，避免拉伸变形。
-            # 如果希望图片完全填充控件，牺牲长宽比，则使用 resize
-            
-            # 方案 1 (推荐): 保持比例缩放，并居中显示
-            img_w, img_h = img.size
-            
-            # 计算缩放因子，使图片能适应 Label 尺寸
-            ratio_w = width / img_w
-            ratio_h = height / img_h
-            
-            # 取较小的比例因子，确保图片完全可见
-            scale_factor = min(ratio_w, ratio_h) 
-            
-            new_w = int(img_w * scale_factor)
-            new_h = int(img_h * scale_factor)
+            # 调试点 3: 尝试打开图像 (最可能失败的地方 1: Pillow插件缺失/损坏)
+            image = Image.open(image_path)
+            self.controller.log_message(f"[DEBUG-IMAGE] 成功打开图像. 原始尺寸: {image.size}")
 
-            # 缩放图片
-            img = img.resize((new_w, new_h), Image.LANCZOS)
+            # 调整尺寸
+            image = image.resize(size, Image.Resampling.LANCZOS)
+            self.controller.log_message(f"[DEBUG-IMAGE] 尺寸调整到: {size}")
             
-            # 3. 创建 Tkinter PhotoImage 对象
-            tk_img = ImageTk.PhotoImage(img)
+            # 调试点 4: 尝试创建 PhotoImage (最可能失败的地方 2: PhotoImage转换失败)
+            tk_image = ImageTk.PhotoImage(image)
+            self.controller.log_message(f"[DEBUG-IMAGE] 成功创建 ImageTk.PhotoImage 对象.")
+            
+            # ------------------- 持久化和显示 -------------------
+            # 关键步骤 1: 将引用存储在实例字典中 (防止 GC)
+            self.image_tk_references[key] = tk_image 
+            self.controller.log_message(f"[DEBUG-IMAGE] PhotoImage 引用已存储到 self.image_tk_references['{key}'].")
+            
+            # 关键步骤 2: 更新 Label 配置
+            label.config(image=self.image_tk_references[key])
+            
+            # 关键步骤 3: 附加到 Label 控件 (双重保险)
+            label.image = self.image_tk_references[key] 
+            
+            self.controller.log_message(f"[UI] 图像显示成功. Key='{key}'.")
 
-            self.image_tk_references[key] = tk_img
-            
-            # 4. 更新 Label 控件
-            # 确保 Label 对齐方式正确 (anchor='center' 通常就够了)
-            label.config(image=self.image_tk_references[key], text='', anchor='center')
-            
-            # 6. 存储引用以防止垃圾回收
-            label.image = self.image_tk_references[key]
-            label.config(background='white') # 成功加载后，背景色设为白色
-            
         except Exception as e:
-            # 7. 处理加载失败的情况
-            self.controller.log_message(f"[图像错误] 无法加载 {image_path}: {e}")
-            label.config(image='', text=f"图像加载失败:\n{Path(image_path).name}", background='#F2DEDE')
+            # 调试点 5: 捕获所有图像处理和显示失败的异常
+            self.controller.log_message(f"[FATAL-IMAGE] 图像处理或显示失败! Key='{key}'. 错误: {e}")
+            traceback.print_exc()
+            
+            # 失败后清空 Label
+            label.config(image='')
+            label.image = None
 
 
     def _create_count_table_panel(self, parent):
