@@ -179,7 +179,8 @@ class DicomGFRApp:
             # +++ ---------------------------------- +++
             # --- GFR 计算结果更新 ---
             if task_name == "GFR 计算" and result.get('gfr'):
-                 self.log_message("计算结果:\n" + json.dumps(result.get('gfr', {}), indent=4, ensure_ascii=False))
+                #  self.log_message("计算结果:\n" + json.dumps(result.get('gfr', {}), indent=4, ensure_ascii=False))
+                pass
             # ------------------------
             
         else:
@@ -907,6 +908,7 @@ class CTDepthFrame(FeatureFrameBase):
 # -------------------------------------------------------------
 class GFRCalculationFrame(FeatureFrameBase):
     def __init__(self, parent, controller):
+        self.gfr_labels = {}
         super().__init__(parent, controller, "4. 计算 GFR")
 
     def create_widgets(self):
@@ -931,6 +933,10 @@ class GFRCalculationFrame(FeatureFrameBase):
                    text="手动上传深度/患者信息", 
                    command=self.controller.show_upload_depth_dialog,
                    ).pack(side=tk.LEFT, padx=10, ipadx=10, ipady=10)
+        
+        # 2. GFR 结果表格容器
+        self.gfr_table_frame = self._create_gfr_table_panel(self.content_frame)
+        self.gfr_table_frame.pack(pady=30, padx=20, fill='x')
                    
     # 核心处理逻辑 (在线程中执行)
     def handle_calculate_gfr_threaded(self):
@@ -951,11 +957,68 @@ class GFRCalculationFrame(FeatureFrameBase):
             traceback.print_exc()
             self.controller.master.after(0, self._gfr_completion_failure, result)
 
+    def _create_gfr_table_panel(self, parent):
+        """创建用于显示 GFR 结果的 LabelFrame 容器"""
+        frame = ttk.LabelFrame(parent, text="肾小球滤过率 (GFR) 计算结果 (ml/min)", padding=10)
+        
+        # 表格数据结构
+        # 键: (行号, 描述, GFR-Key)
+        data_rows = [
+            (1, "基于模型深度 GFR", 'leftGFR', 'rightGFR', 'totalGFR'),
+            (2, "基于李氏深度 GFR", 'LiLeftGFR', 'LiRightGFR', 'LiTotalGFR')
+        ]
+        
+        # 表头
+        ttk.Label(frame, text="指标", font=self.controller.button_font).grid(row=0, column=0, padx=10, pady=5, sticky='ew')
+        ttk.Label(frame, text="左肾 GFR", font=self.controller.button_font).grid(row=0, column=1, padx=10, pady=5, sticky='ew')
+        ttk.Label(frame, text="右肾 GFR", font=self.controller.button_font).grid(row=0, column=2, padx=10, pady=5, sticky='ew')
+        ttk.Label(frame, text="总 GFR", font=self.controller.button_font, foreground='blue').grid(row=0, column=3, padx=10, pady=5, sticky='ew')
+        
+        # 填充数据行
+        for row_num, desc, left_key, right_key, total_key in data_rows:
+            ttk.Label(frame, text=desc).grid(row=row_num, column=0, padx=10, pady=5, sticky='w')
+            
+            # 左肾
+            self.gfr_labels[left_key] = ttk.Label(frame, text="N/A")
+            self.gfr_labels[left_key].grid(row=row_num, column=1, padx=10, pady=5, sticky='e')
+            
+            # 右肾
+            self.gfr_labels[right_key] = ttk.Label(frame, text="N/A")
+            self.gfr_labels[right_key].grid(row=row_num, column=2, padx=10, pady=5, sticky='e')
+            
+            # 总 GFR (加粗显示)
+            self.gfr_labels[total_key] = ttk.Label(frame, text="N/A", font=self.controller.button_font, foreground='blue')
+            self.gfr_labels[total_key].grid(row=row_num, column=3, padx=10, pady=5, sticky='e')
+
+        # 确保列可扩展
+        for c in range(1, 4):
+            frame.grid_columnconfigure(c, weight=1)
+            
+        return frame
+    
+    def update_gfr_results(self, gfr_data: Dict[str, float]):
+        """根据 GFR 结果更新表格内容"""
+        
+        for key, label_widget in self.gfr_labels.items():
+            value = gfr_data.get(key)
+            
+            if isinstance(value, (int, float)):
+                # 格式化为两位小数
+                display_value = f"{value:.2f}"
+            else:
+                display_value = "N/A"
+                
+            label_widget.config(text=display_value)
+            
+        self.controller.log_message("[系统提示] GFR 计算结果表格已更新。")
+
     def _gfr_completion_success(self, result):
         """GFR 计算成功后在主线程中更新 UI"""
         self.controller.master.config(cursor="") 
         self.controller.log_message("[成功] GFR 计算完成。")
-        self.controller.log_message("计算结果:\n" + json.dumps(result.get('gfr', {}), indent=4, ensure_ascii=False))
+        self.update_gfr_results(result.get('gfr', {}))
+        # self.controller.log_message("计算结果:\n" + json.dumps(result.get('gfr', {}), indent=4, ensure_ascii=False))
+        self.controller.display_status()
 
     def _gfr_completion_failure(self, result):
         """GFR 计算失败后在主线程中更新 UI"""
