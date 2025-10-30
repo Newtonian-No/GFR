@@ -33,24 +33,7 @@ jobs:
     - name: Run PyInstaller Build
       shell: powershell 
       run: |
-        # 关键修改 2: 使用 Windows 路径分隔符 (\)
-        pyinstaller -D -w better_app.py --name GFR_App `
-            --collect-all back `
-            --collect-all pillow `
-            --collect-data ultralytics `
-            --add-data "back\weights;back\weights" ` # 👈 修正：使用分号和反斜杠
-            --add-data "back\CT;back\CT" `            # 👈 修正：使用分号和反斜杠
-            --add-data "back\networks;back\networks" ` 
-            --hidden-import "super_gradients" `
-            --hidden-import "shapely" `
-            --hidden-import "dill" `
-            --hidden-import "tabulate" `
-            --collect-all pillow `
-            --hidden-import "PIL._imaging" `
-            --hidden-import "PIL._imagingtk" `
-            --hidden-import "PIL._tkinter_finder"`
-            --hidden-import "PIL.Image" `
-            --hidden-import "PIL.PngImagePlugin"
+        pyinstaller -D -w better_app.py --name GFR_App --collect-all back --collect-all pillow --collect-data ultralytics --add-data "back\weights;back\weights" --add-data "back\CT;back\CT" --add-data "back\networks;back\networks" --hidden-import "super_gradients" --hidden-import "shapely" --hidden-import "dill" --hidden-import "tabulate" --collect-all pillow --hidden-import "PIL._imaging" --hidden-import "PIL._imagingtk" --hidden-import "PIL._tkinter_finder" --hidden-import "PIL.Image" --hidden-import "PIL.PngImagePlugin"
             
     - name: Prepare Artifact
       shell: bash
