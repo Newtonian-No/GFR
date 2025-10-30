@@ -9,6 +9,7 @@ from pathlib import Path
 import sys
 from PIL import Image, ImageTk
 from typing import Dict, Any, Optional
+from back.constants import ALL_OUTPUT_DIRS
 # ----------------------------------------------------------------------
 # 导入 DicomProcessor 类
 # 确保 local_dicom_process.py 文件位于此脚本的同一目录下
@@ -615,6 +616,7 @@ class DynamicStudyFrame(FeatureFrameBase):
 
         try:
             # 1. 打开图像
+            print(f"加载图像: {image_path}") # 调试信息，确认路径正确
             img = Image.open(image_path)
             
             # 2. 调整图像尺寸以适应显示区域
@@ -647,13 +649,15 @@ class DynamicStudyFrame(FeatureFrameBase):
             
             # 3. 创建 Tkinter PhotoImage 对象
             tk_img = ImageTk.PhotoImage(img)
+
+            self.image_tk_references[key] = tk_img
             
             # 4. 更新 Label 控件
             # 确保 Label 对齐方式正确 (anchor='center' 通常就够了)
-            label.config(image=tk_img, text='', anchor='center')
+            label.config(image=self.image_tk_references[key], text='', anchor='center')
             
             # 6. 存储引用以防止垃圾回收
-            self.image_tk_references[key] = tk_img
+            label.image = self.image_tk_references[key]
             label.config(background='white') # 成功加载后，背景色设为白色
             
         except Exception as e:
@@ -828,6 +832,7 @@ class CTDepthFrame(FeatureFrameBase):
 
         try:
             # 1. 打开图像
+            print(f"DEBUG: 加载图像: {image_path}") # 调试信息，确认路径正确
             img = Image.open(image_path)
             
             # 2. 调整图像尺寸以适应显示区域
@@ -860,13 +865,15 @@ class CTDepthFrame(FeatureFrameBase):
             
             # 3. 创建 Tkinter PhotoImage 对象
             tk_img = ImageTk.PhotoImage(img)
+
+            self.image_tk_references[key] = tk_img
             
             # 4. 更新 Label 控件
             # 确保 Label 对齐方式正确 (anchor='center' 通常就够了)
-            label.config(image=tk_img, text='', anchor='center')
+            label.config(image=self.image_tk_references[key], text='', anchor='center')
             
             # 6. 存储引用以防止垃圾回收
-            self.image_tk_references[key] = tk_img
+            label.image = self.image_tk_references[key]
             label.config(background='white') # 成功加载后，背景色设为白色
             
         except Exception as e:
@@ -1033,8 +1040,15 @@ class GFRCalculationFrame(FeatureFrameBase):
 # ====================================================================
 
 if __name__ == "__main__":
-    # 创建 'output' 目录，防止 DicomProcessor 实例化时出错
-    os.makedirs("output", exist_ok=True)
+    # 确保 DICOM 处理所需的输出目录结构存在
+    for dir_path in ALL_OUTPUT_DIRS:
+        # 使用 os.makedirs 确保递归创建所有子目录
+        try:
+            # dir_path 现在是 pathlib.Path 对象，使用其方法
+            dir_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            # 如果权限有问题，至少给个提示
+            print(f"警告：无法创建目录 {dir_path}: {e}")
     
     root = tk.Tk()
     

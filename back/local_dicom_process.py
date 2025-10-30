@@ -30,7 +30,6 @@ from back.constants import (
     CONVERTED_OUTPUT_DIR, 
     SEGMENTED_OUTPUT_DIR, 
     GRAPH_OUTPUT_DIR,
-    UPLOAD_DIR,
     DEPTH_OUTPUT_DIR,
     ORIGINAL_CT_DIR,
     ALL_OUTPUT_DIRS # 用于创建目录列表
@@ -94,7 +93,6 @@ class DicomProcessor:
     
     def __init__(self):
         # 路径配置
-        self.UPLOAD_FOLDER = str(UPLOAD_DIR) 
         self.CONVERTED_FOLDER_NAME = 'converted' # 仅保留名称 (可选)
         self.SEGMENTED_FOLDER_NAME = 'ROI'
         self.ALLOWED_EXTENSIONS = {'dcm'}
