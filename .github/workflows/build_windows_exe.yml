@@ -2,10 +2,6 @@
 name: Build Windows Executable
 
 on:
-  # 触发条件：当代码推送到 main 分支时
-  push:
-    branches:
-      - main
   # 也可以手动触发
   workflow_dispatch:
 

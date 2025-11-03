@@ -19,11 +19,11 @@ from pathlib import Path
 import json
 # 假设这些模块已存在且能被导入
 from back.CT.api import process_ct_input
-from back.preprocess import extract_frame, resample_dicom
-from back.predict import segment_kidney
-from back.ROI import add_background_roi
-from back.overlay import display_dicom_with_roi_overlay
-from back.graph import graph
+from back.roi.preprocess import extract_frame, resample_dicom
+from back.roi.predict import segment_kidney
+from back.roi.ROI import add_background_roi
+from back.roi.overlay import display_dicom_with_roi_overlay
+from back.roi.graph import graph
 from back.constants import (
     LOCAL_DICOM_MODEL_PATH, 
     OUTPUT_DIR, 

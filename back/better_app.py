@@ -49,7 +49,7 @@ class DicomGFRApp:
     def __init__(self, master):
         self.master = master
         master.title("DICOM GFR 计算工具")
-        master.geometry("1000x1200") # 设置一个更宽敞的初始窗口大小
+        master.geometry("1920x1280") # 设置一个更宽敞的初始窗口大小
 
         # 实例化核心处理器类
         self.processor = DicomProcessor()
@@ -117,19 +117,33 @@ class DicomGFRApp:
         log_frame = ttk.LabelFrame(self.master, text="操作日志与状态结果:", padding=(10, 5))
         log_frame.pack(fill="x", padx=10, pady=(0, 10))
 
+        # 1. 创建内容框架，使用 Grid 实现左右布局
+        content_frame = ttk.Frame(log_frame)
+        content_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # 配置 Grid 权重：左侧日志区权重为1 (扩展)，右侧按钮区权重为0 (固定大小)
+        content_frame.grid_columnconfigure(0, weight=1) 
+        content_frame.grid_columnconfigure(1, weight=0) 
+        content_frame.grid_rowconfigure(0, weight=1)
+
+        # 2. 左侧：日志区 (Grid 0, 0)
         self.output_text = scrolledtext.ScrolledText(
-            log_frame, width=90, height=12, font=self.log_font, wrap=tk.WORD
+            content_frame, width=90, height=18, font=self.log_font, wrap=tk.WORD
         )
-        self.output_text.pack(fill="both", expand=True)
+        self.output_text.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         
-        # 添加查看和重置状态按钮
-        status_button_frame = ttk.Frame(log_frame)
-        status_button_frame.pack(fill="x", pady=5)
+        # 3. 右侧：按钮容器 (Grid 0, 1)
+        button_container = ttk.Frame(content_frame)
+        button_container.grid(row=0, column=1, sticky="ns")
         
-        ttk.Button(status_button_frame, text="查看当前处理器状态", 
-                   command=self.display_status).pack(side=tk.LEFT, padx=5, expand=True)
-        ttk.Button(status_button_frame, text="重置处理器状态", 
-                   command=self.clear_globals).pack(side=tk.LEFT, padx=5, expand=True)
+        # 4. 按钮：在右侧容器中垂直堆叠 (Pack fill='x')
+        ttk.Button(button_container, 
+                   text="查看当前处理器状态", 
+                   command=self.display_status).pack(fill='x', pady=5, ipadx=10)
+                   
+        ttk.Button(button_container, 
+                   text="重置处理器状态", 
+                   command=self.clear_globals).pack(fill='x', pady=5, ipadx=10)
 
 
     # -------------------------------------------------------------
@@ -408,7 +422,7 @@ class FeatureFrameBase(ttk.Frame):
         path_frame = ttk.LabelFrame(container, text="DICOM 文件/文件夹路径选择", padding=(10, 5))
         path_frame.pack(padx=20, pady=10, fill="x")
         
-        self.path_entry = ttk.Entry(path_frame, width=60)
+        self.path_entry = ttk.Entry(path_frame, width=80)
         self.path_entry.insert(0, "请点击 '选择' 按钮")
         self.path_entry.pack(side=tk.LEFT, expand=True, fill="x", padx=(0, 5))
         
@@ -441,6 +455,62 @@ class FeatureFrameBase(ttk.Frame):
             self.path_entry.delete(0, tk.END)
             self.path_entry.insert(0, folderpath)
             self.controller.log_message(f"[系统提示] 已选择文件夹: {folderpath}")
+
+    def _load_and_display_image(self, label: ttk.Label, image_path: Optional[str], key: str, size=(300, 300)):
+        """加载、调整大小并显示图像，同时进行引用持久化。"""
+
+        # ------------------- 路径和文件检查 -------------------
+        if not image_path:
+            label.config(image='')
+            label.image = None
+            return
+
+        if not os.path.exists(image_path):
+            label.config(image='')
+            label.image = None
+            return
+
+        # ------------------- 图像加载和处理 -------------------
+        try:
+            image = Image.open(image_path)
+
+            # 调整尺寸
+            # image = image.resize(size, Image.Resampling.LANCZOS)
+
+            # 计算新的尺寸以保持长宽比
+            original_width, original_height = image.size
+            max_width, max_height = size
+            # 计算保持长宽比的最大缩放比例
+            ratio_w = max_width / original_width
+            ratio_h = max_height / original_height
+            # 选择较小的比例，确保图片完全适应最大边界 (700x500)
+            ratio = max(ratio_w, ratio_h)
+            # 计算新的尺寸
+            new_width = int(original_width * ratio)
+            new_height = int(original_height * ratio)
+            # 如果新尺寸过小 (例如，原始图片很小)，可以考虑不缩放或设置最小尺寸
+            if new_width == 0 or new_height == 0:
+                 # 保持原尺寸如果太小，但通常不会发生
+                 new_width, new_height = original_width, original_height
+            # 使用新的尺寸进行调整
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+            tk_image = ImageTk.PhotoImage(image)
+        
+            # ------------------- 持久化和显示 -------------------
+            # 关键步骤 1: 将引用存储在实例字典中 (防止 GC)
+            self.image_tk_references[key] = tk_image 
+        
+            # 关键步骤 2: 更新 Label 配置
+            label.config(image=self.image_tk_references[key])
+        
+            # 关键步骤 3: 附加到 Label 控件 (双重保险)
+            label.image = self.image_tk_references[key] 
+
+        except Exception:
+            # 失败后清空 Label
+            label.config(image='')
+            label.image = None
             
 # -------------------------------------------------------------
 # 1. 肾动态显像处理界面
@@ -450,7 +520,7 @@ class DynamicStudyFrame(FeatureFrameBase):
         self.image_labels = {} 
         self.count_labels = {} 
         self.image_tk_references = {} 
-        self.image_display_size = (300, 300)
+        self.image_display_size = (500, 500)
         super().__init__(parent, controller, "1. 处理肾动态显像 DICOM")
 
     def create_widgets(self):
@@ -597,64 +667,6 @@ class DynamicStudyFrame(FeatureFrameBase):
         
         self.controller.log_message("[系统提示] 图像路径和计数表已更新。")
 
-    def _load_and_display_image(self, label: ttk.Label, image_path: Optional[str], key: str, size=(300, 300)):
-        """加载、调整大小并显示图像，同时进行详细调试和引用持久化。"""
-        
-        # 调试点 1: 函数开始及参数检查
-        self.controller.log_message(f"[DEBUG-IMAGE] 开始加载 key='{key}' 的图像.")
-        
-        # ------------------- 路径和文件检查 -------------------
-        if not image_path:
-            self.controller.log_message(f"[DEBUG-IMAGE] 路径为空，key='{key}' 图像加载终止.")
-            label.config(image='')
-            label.image = None
-            return
-
-        if not os.path.exists(image_path):
-            abs_path = os.path.abspath(image_path)
-            self.controller.log_message(f"[ERROR-IMAGE] 图像文件不存在! Key='{key}'. 尝试路径: {abs_path}")
-            label.config(image='')
-            label.image = None
-            return
-
-        # 调试点 2: 确认文件存在
-        self.controller.log_message(f"[DEBUG-IMAGE] 图像文件存在. 绝对路径: {os.path.abspath(image_path)}")
-        
-        # ------------------- 图像加载和处理 -------------------
-        try:
-            # 调试点 3: 尝试打开图像 (最可能失败的地方 1: Pillow插件缺失/损坏)
-            image = Image.open(image_path)
-            self.controller.log_message(f"[DEBUG-IMAGE] 成功打开图像. 原始尺寸: {image.size}")
-
-            # 调整尺寸
-            image = image.resize(size, Image.Resampling.LANCZOS)
-            self.controller.log_message(f"[DEBUG-IMAGE] 尺寸调整到: {size}")
-            
-            # 调试点 4: 尝试创建 PhotoImage (最可能失败的地方 2: PhotoImage转换失败)
-            tk_image = ImageTk.PhotoImage(image)
-            self.controller.log_message(f"[DEBUG-IMAGE] 成功创建 ImageTk.PhotoImage 对象.")
-            
-            # ------------------- 持久化和显示 -------------------
-            # 关键步骤 1: 将引用存储在实例字典中 (防止 GC)
-            self.image_tk_references[key] = tk_image 
-            self.controller.log_message(f"[DEBUG-IMAGE] PhotoImage 引用已存储到 self.image_tk_references['{key}'].")
-            
-            # 关键步骤 2: 更新 Label 配置
-            label.config(image=self.image_tk_references[key])
-            
-            # 关键步骤 3: 附加到 Label 控件 (双重保险)
-            label.image = self.image_tk_references[key] 
-            
-            self.controller.log_message(f"[UI] 图像显示成功. Key='{key}'.")
-
-        except Exception as e:
-            # 调试点 5: 捕获所有图像处理和显示失败的异常
-            self.controller.log_message(f"[FATAL-IMAGE] 图像处理或显示失败! Key='{key}'. 错误: {e}")
-            traceback.print_exc()
-            
-            # 失败后清空 Label
-            label.config(image='')
-            label.image = None
 
 # -------------------------------------------------------------
 # 2. CT 深度计算界面
@@ -665,7 +677,7 @@ class CTDepthFrame(FeatureFrameBase):
         self.image_label = None        # 用于显示 CT 图像的 Label (引用 self.image_labels['ct_slice'])
         self.depth_labels = {}         # 用于显示深度的 Label
         self.image_tk_references = {}  # 存储 PhotoImage 引用
-        self.image_display_size = (300, 300)
+        self.image_display_size = (700, 500)
         super().__init__(parent, controller, "2. 处理 CT 深度计算")
 
     def _create_result_panel(self, parent, title, key):
@@ -803,65 +815,6 @@ class CTDepthFrame(FeatureFrameBase):
             label_widget.config(text=display_value)
         
         self.controller.log_message("[系统提示] CT 图像和深度表已更新。")
-
-    def _load_and_display_image(self, label: ttk.Label, image_path: Optional[str], key: str, size=(300, 300)):
-        """加载、调整大小并显示图像，同时进行详细调试和引用持久化。"""
-        
-        # 调试点 1: 函数开始及参数检查
-        self.controller.log_message(f"[DEBUG-IMAGE] 开始加载 key='{key}' 的图像.")
-        
-        # ------------------- 路径和文件检查 -------------------
-        if not image_path:
-            self.controller.log_message(f"[DEBUG-IMAGE] 路径为空，key='{key}' 图像加载终止.")
-            label.config(image='')
-            label.image = None
-            return
-
-        if not os.path.exists(image_path):
-            abs_path = os.path.abspath(image_path)
-            self.controller.log_message(f"[ERROR-IMAGE] 图像文件不存在! Key='{key}'. 尝试路径: {abs_path}")
-            label.config(image='')
-            label.image = None
-            return
-
-        # 调试点 2: 确认文件存在
-        self.controller.log_message(f"[DEBUG-IMAGE] 图像文件存在. 绝对路径: {os.path.abspath(image_path)}")
-        
-        # ------------------- 图像加载和处理 -------------------
-        try:
-            # 调试点 3: 尝试打开图像 (最可能失败的地方 1: Pillow插件缺失/损坏)
-            image = Image.open(image_path)
-            self.controller.log_message(f"[DEBUG-IMAGE] 成功打开图像. 原始尺寸: {image.size}")
-
-            # 调整尺寸
-            image = image.resize(size, Image.Resampling.LANCZOS)
-            self.controller.log_message(f"[DEBUG-IMAGE] 尺寸调整到: {size}")
-            
-            # 调试点 4: 尝试创建 PhotoImage (最可能失败的地方 2: PhotoImage转换失败)
-            tk_image = ImageTk.PhotoImage(image)
-            self.controller.log_message(f"[DEBUG-IMAGE] 成功创建 ImageTk.PhotoImage 对象.")
-            
-            # ------------------- 持久化和显示 -------------------
-            # 关键步骤 1: 将引用存储在实例字典中 (防止 GC)
-            self.image_tk_references[key] = tk_image 
-            self.controller.log_message(f"[DEBUG-IMAGE] PhotoImage 引用已存储到 self.image_tk_references['{key}'].")
-            
-            # 关键步骤 2: 更新 Label 配置
-            label.config(image=self.image_tk_references[key])
-            
-            # 关键步骤 3: 附加到 Label 控件 (双重保险)
-            label.image = self.image_tk_references[key] 
-            
-            self.controller.log_message(f"[UI] 图像显示成功. Key='{key}'.")
-
-        except Exception as e:
-            # 调试点 5: 捕获所有图像处理和显示失败的异常
-            self.controller.log_message(f"[FATAL-IMAGE] 图像处理或显示失败! Key='{key}'. 错误: {e}")
-            traceback.print_exc()
-            
-            # 失败后清空 Label
-            label.config(image='')
-            label.image = None
 
 
     def _create_count_table_panel(self, parent):
