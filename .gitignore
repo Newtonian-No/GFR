@@ -12,5 +12,6 @@ backend_code.tar.gz
 train_find/extracted/
 train_find/CT/
 back/testing/
+back/weights/
 *.tar.gz
 *.spec
