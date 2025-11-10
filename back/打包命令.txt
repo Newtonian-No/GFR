@@ -1,3 +1,4 @@
+#  linux
 pyinstaller -D -c back/better_app.py --name GFR_App \
     --collect-all back \
     --collect-data ultralytics \
@@ -14,3 +15,21 @@ pyinstaller -D -c back/better_app.py --name GFR_App \
     --hidden-import "PIL._tkinter_finder"\
     --hidden-import "PIL.Image" \
     --hidden-import "PIL.PngImagePlugin"
+
+#  Windows
+pyinstaller -D -w back/better_app.py --name GFR_App `
+        --collect-all back `
+        --collect-all pillow `
+        --collect-data ultralytics `
+        --add-data "./back/weights:back/weights" `
+        --add-data "./back/CT:back/CT" `
+        --add-data "./back/networks:back/networks" `
+        --hidden-import "super_gradients" `
+        --hidden-import "shapely" `
+        --hidden-import "dill" `
+        --hidden-import "tabulate" `
+        --hidden-import "PIL._imaging" `
+        --hidden-import "PIL._imagingtk" `
+        --hidden-import "PIL._tkinter_finder" `
+        --hidden-import "PIL.Image" `
+        --hidden-import "PIL.PngImagePlugin"
