@@ -15,7 +15,6 @@ from back.constants import ALL_OUTPUT_DIRS
 # 确保 local_dicom_process.py 文件位于此脚本的同一目录下
 # ----------------------------------------------------------------------
 try:
-    # 假设 'back.local_dicom_process' 位于正确的 Python 路径上
     from back.local_dicom_process import DicomProcessor
 except ImportError:
     messagebox.showerror("导入错误", "无法导入 DicomProcessor 类。请确保 'local_dicom_process.py' 文件在正确路径中。")
@@ -27,7 +26,7 @@ except ImportError:
             self.last_patient_info = {}
             self.last_kidney_counts = {}
             self.last_manufacturer = None
-            self.last_patient_name = None # 保持与您原代码中的重置逻辑一致
+            self.last_patient_name = None 
         def process_dynamic_study_dicom(self, path): return {'success': False, 'message': '处理器未初始化'}
         def process_depth_dicom(self, path): return {'success': False, 'message': '处理器未初始化'}
         def process_depth_dicomfile(self, path): return {'success': False, 'message': '处理器未初始化'} # 确保文件夹处理方法存在
@@ -42,23 +41,22 @@ except ImportError:
             return True
 
 # ====================================================================
-# Tkinter GUI 实现 (重写为基于 Frame 的切换结构)
+# Tkinter GUI 实现 (基于 Frame 的切换结构)
 # ====================================================================
 
 class DicomGFRApp:
     def __init__(self, master):
         self.master = master
         master.title("DICOM GFR 计算工具")
-        master.geometry("1920x1280") # 设置一个更宽敞的初始窗口大小
+        master.geometry("1920x1280") 
 
         # 实例化核心处理器类
         self.processor = DicomProcessor()
         
-        # --- 字体设置 (使用 ttk 统一风格) ---
+        # --- 字体设置  ---
         default_font_name = 'Arial'
         
         if platform.system() == 'Linux':
-            # 保持用户确认有效的 'newspaper' 字体
             self.app_font = ('newspaper', 12) 
         else:
             self.app_font = (default_font_name, 12)
@@ -85,7 +83,7 @@ class DicomGFRApp:
         self.frames["MainMenu"] = MainMenuFrame(self.main_container, self)
         self.frames["Feature1"] = DynamicStudyFrame(self.main_container, self)
         self.frames["Feature2"] = CTDepthFrame(self.main_container, self)
-        # Note: Feature3 (手动上传) 被移除，改为对话框
+        # Feature3 (手动上传) 被移除，改为对话框
         self.frames["Feature4"] = GFRCalculationFrame(self.main_container, self)
         
         # 将所有 Frame 放到同一位置，初始只显示 MainMenu
@@ -108,7 +106,7 @@ class DicomGFRApp:
     def show_frame(self, page_name):
         """显示指定名称的 Frame"""
         frame = self.frames[page_name]
-        frame.tkraise() # 提升到顶部显示
+        frame.tkraise() 
         self.log_message(f"\n[系统提示] 已切换到: {page_name}")
         
     # --- 统一的日志和状态区 ---
@@ -483,14 +481,13 @@ class FeatureFrameBase(ttk.Frame):
             # 计算保持长宽比的最大缩放比例
             ratio_w = max_width / original_width
             ratio_h = max_height / original_height
-            # 选择较小的比例，确保图片完全适应最大边界 (700x500)
+            # 选择较小的比例，确保图片完全适应最大边界
             ratio = max(ratio_w, ratio_h)
             # 计算新的尺寸
             new_width = int(original_width * ratio)
             new_height = int(original_height * ratio)
-            # 如果新尺寸过小 (例如，原始图片很小)，可以考虑不缩放或设置最小尺寸
+            
             if new_width == 0 or new_height == 0:
-                 # 保持原尺寸如果太小，但通常不会发生
                  new_width, new_height = original_width, original_height
             # 使用新的尺寸进行调整
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
@@ -498,13 +495,13 @@ class FeatureFrameBase(ttk.Frame):
             tk_image = ImageTk.PhotoImage(image)
         
             # ------------------- 持久化和显示 -------------------
-            # 关键步骤 1: 将引用存储在实例字典中 (防止 GC)
+            # 将引用存储在实例字典中
             self.image_tk_references[key] = tk_image 
         
-            # 关键步骤 2: 更新 Label 配置
+            # 更新 Label 配置
             label.config(image=self.image_tk_references[key])
         
-            # 关键步骤 3: 附加到 Label 控件 (双重保险)
+            # 附加到 Label 控件
             label.image = self.image_tk_references[key] 
 
         except Exception:
@@ -551,7 +548,7 @@ class DynamicStudyFrame(FeatureFrameBase):
         
         # 顶部两栏
         top_row = ttk.Frame(result_frame)
-        top_row.pack(fill='both', expand=True) # 使用 expand=True 使图像区域能拉伸
+        top_row.pack(fill='both', expand=True)
         
         # 底部两栏
         bottom_row = ttk.Frame(result_frame)
@@ -657,7 +654,6 @@ class DynamicStudyFrame(FeatureFrameBase):
         counts = result.get('kidneyCounts', {})
         for key, label in self.count_labels.items():
             value = counts.get(key, "N/A")
-            # 格式化显示，例如保留两位小数
             if isinstance(value, (int, float)):
                 display_value = f"{value:.2f}" if isinstance(value, float) else str(value)
             else:
@@ -673,10 +669,10 @@ class DynamicStudyFrame(FeatureFrameBase):
 # -------------------------------------------------------------
 class CTDepthFrame(FeatureFrameBase):
     def __init__(self, parent, controller):
-        self.image_labels = {}         # 必须先初始化，供 _create_result_panel 使用
-        self.image_label = None        # 用于显示 CT 图像的 Label (引用 self.image_labels['ct_slice'])
-        self.depth_labels = {}         # 用于显示深度的 Label
-        self.image_tk_references = {}  # 存储 PhotoImage 引用
+        self.image_labels = {}         
+        self.image_label = None        
+        self.depth_labels = {}         
+        self.image_tk_references = {}  
         self.image_display_size = (700, 500)
         super().__init__(parent, controller, "2. 处理 CT 深度计算")
 
@@ -684,18 +680,15 @@ class CTDepthFrame(FeatureFrameBase):
         """创建用于显示图像的LabelFrame容器"""
         frame = ttk.LabelFrame(parent, text=title, padding=5) 
         
-        # LabelFrame 内部使用 Grid 布局，并让其可扩展
         frame.grid_rowconfigure(0, weight=1)
         frame.grid_columnconfigure(0, weight=1)
         
-        # 图像显示区域 (Label) - 移除 width/height 属性
         image_label = ttk.Label(frame, text="暂无图像\n(等待加载...)", 
                                                 anchor="center", 
                                                 justify=tk.CENTER,
                                                 background='#E0E0E0', 
                                                 relief=tk.SUNKEN)
         
-        # 使用 grid 布局，并设置为 sticky='nsew' 填满 LabelFrame
         image_label.grid(row=0, column=0, sticky='nsew', padx=5, pady=5) 
         
         self.image_labels[key] = image_label
@@ -704,7 +697,7 @@ class CTDepthFrame(FeatureFrameBase):
     def create_widgets(self):
         
         # 路径选择 
-        self.create_path_selection(self.content_frame) # <-- 沿用父类的 path_entry
+        self.create_path_selection(self.content_frame) 
 
         ttk.Label(self.content_frame, text="提示: 请选择 CT 序列所在的文件夹，或者单个包含深度信息的 DICOM 文件。", 
                   font=self.controller.log_font).pack(pady=(0, 20))
@@ -726,11 +719,10 @@ class CTDepthFrame(FeatureFrameBase):
                    command=self.controller.show_upload_depth_dialog,
                    ).pack(side=tk.LEFT, padx=10, ipadx=10, ipady=10)
 
-        # --- 结果显示区 (2x2 Grid) ---
+        # --- 结果显示区  ---
         result_grid = ttk.Frame(self.content_frame)
         result_grid.pack(fill='both', expand=True, padx=5, pady=5) 
         
-        # 配置 Grid 权重，让所有区域都可扩展
         result_grid.grid_rowconfigure(0, weight=1)
         result_grid.grid_rowconfigure(1, weight=1)
         result_grid.grid_columnconfigure(0, weight=1)
@@ -804,12 +796,10 @@ class CTDepthFrame(FeatureFrameBase):
         for key, label_widget in self.depth_labels.items():
             value = result.get(key, "N/A")
 
-            # 格式化显示 (保留两位小数，单位 mm)
+            # 格式化显示
             if isinstance(value, (int, float)):
-                # 确保格式化为两位小数
                 display_value = f"{value:.2f} mm"
             else:
-                # 如果是 "N/A" 或其他非数字值，直接显示
                 display_value = str(value)
 
             label_widget.config(text=display_value)
@@ -876,11 +866,11 @@ class GFRCalculationFrame(FeatureFrameBase):
                    command=self.controller.show_upload_depth_dialog,
                    ).pack(side=tk.LEFT, padx=10, ipadx=10, ipady=10)
         
-        # 2. GFR 结果表格容器
+        # GFR 结果表格容器
         self.gfr_table_frame = self._create_gfr_table_panel(self.content_frame)
         self.gfr_table_frame.pack(pady=30, padx=20, fill='x')
                    
-    # 核心处理逻辑 (在线程中执行)
+    # 核心处理逻辑
     def handle_calculate_gfr_threaded(self):
         """实际进行 GFR 计算的线程目标函数"""
         self.controller.log_message("\n--- 4. 计算 GFR ---")
@@ -889,10 +879,8 @@ class GFRCalculationFrame(FeatureFrameBase):
             result = self.processor.calculate_gfr()
 
             if result.get('success'):
-                # 成功处理
                 self.controller.master.after(0, self._gfr_completion_success, result)
             else:
-                # 失败处理
                 self.controller.master.after(0, self._gfr_completion_failure, result)
         except Exception as e:
             result = {'success': False, 'message': f'处理时发生未捕获的异常: {e}'}
@@ -945,7 +933,6 @@ class GFRCalculationFrame(FeatureFrameBase):
             value = gfr_data.get(key)
             
             if isinstance(value, (int, float)):
-                # 格式化为两位小数
                 display_value = f"{value:.2f}"
             else:
                 display_value = "N/A"
@@ -975,14 +962,10 @@ class GFRCalculationFrame(FeatureFrameBase):
 # ====================================================================
 
 if __name__ == "__main__":
-    # 确保 DICOM 处理所需的输出目录结构存在
     for dir_path in ALL_OUTPUT_DIRS:
-        # 使用 os.makedirs 确保递归创建所有子目录
         try:
-            # dir_path 现在是 pathlib.Path 对象，使用其方法
             dir_path.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            # 如果权限有问题，至少给个提示
             print(f"警告：无法创建目录 {dir_path}: {e}")
     
     root = tk.Tk()
@@ -990,11 +973,10 @@ if __name__ == "__main__":
     # 尝试设置 ttk 主题
     try:
         style = ttk.Style()
-        # 尝试使用现代主题，例如 'clam' 或 'alt'
         style.theme_use('clam') 
     except:
         print("Failed to set ttk theme.")
-        pass # 无法设置主题，使用默认样式
+        pass
         
     app = DicomGFRApp(root)
     root.mainloop()

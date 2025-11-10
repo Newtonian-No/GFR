@@ -32,59 +32,8 @@ from back.constants import (
     GRAPH_OUTPUT_DIR,
     DEPTH_OUTPUT_DIR,
     ORIGINAL_CT_DIR,
-    ALL_OUTPUT_DIRS # 用于创建目录列表
+    ALL_OUTPUT_DIRS 
 )
-# MODEL_PATH_RELATIVE = 'weights/best_epoch_weights.pth'
-# DICOM_MODEL_PATH = PROJECT_ROOT / MODEL_PATH_RELATIVE
-# --- 模拟外部依赖模块 (用于使代码独立运行/测试) ---
-# 在实际应用中，请替换为您的实际实现
-# def CT(dicom_path: str) -> Tuple[Dict[str, Any], str]:
-#     """模拟 CT 模块的肾脏深度计算"""
-#     print(f"--- 模拟 CT 深度计算: {dicom_path}")
-#     # 模拟结果：深度单位为 mm
-#     return {'L': 75.2, 'R': 70.8}, "output/depth_visualization.png"
-
-# def extract_frame(dicom_path: str, frame_number: int) -> Tuple[str, Any]:
-#     """模拟从多帧DICOM中提取单帧"""
-#     print(f"--- 模拟 extract_frame: 提取帧 {frame_number}")
-#     # 实际应返回保存的单帧DCM路径和数据
-#     return dicom_path, None
-
-# def resample_dicom(original_dcm_path: str, order: int) -> Tuple[str, Any, str]:
-#     """模拟重采样DICOM和生成PNG"""
-#     print(f"--- 模拟 resample_dicom: 重采样和生成PNG")
-#     # 实际应返回重采样后的DCM路径、数据和PNG路径
-#     return "output/resampled.dcm", None, "output/converted/image.png"
-
-# def segment_kidney(resampled_dcm_path: str, model_path: str, img_size: int, num_classes: int) -> Tuple[str, Any]:
-#     """模拟肾脏分割"""
-#     print(f"--- 模拟 segment_kidney: 进行肾脏分割")
-#     # 实际应返回分割结果路径和数据
-#     return "output/segmentation/result.dcm", None
-
-# def add_background_roi(segmentation_path: str) -> Tuple[str, Dict[str, Any]]:
-#     """模拟添加背景ROI"""
-#     print(f"--- 模拟 add_background_roi: 添加本底ROI")
-#     # 模拟 roi_data: 包含左右肾、左右背景的 ROI 掩码信息
-#     roi_data = {'leftKidneyROI': None, 'rightKidneyROI': None, 'leftBackgroundROI': None, 'rightBackgroundROI': None}
-#     return "output/ROI/roi_image.png", roi_data
-
-# def display_dicom_with_roi_overlay(resampled_dcm_path: str, roi_data: Dict[str, Any]) -> str:
-#     """模拟生成带ROI叠加的图像"""
-#     print(f"--- 模拟 display_dicom_with_roi_overlay: 生成叠加图")
-#     return "output/ROI/overlay_image.png"
-
-# def graph(dicom_path: str, roi_data: Dict[str, Any]) -> Tuple[int, int, int, int, str]:
-#     """模拟计算肾脏计数和生成时间-计数曲线"""
-#     print(f"--- 模拟 graph: 计算计数和生成曲线")
-#     # 模拟计数结果 (假设为整数)
-#     left_k_count = 150000
-#     right_k_count = 140000
-#     left_b_count = 5000
-#     right_b_count = 4500
-#     return left_k_count, right_k_count, left_b_count, right_b_count, "output/counts_time_graph.png"
-# ----------------------------------------------------------------------
-
 
 class DicomProcessor:
     """
@@ -93,7 +42,7 @@ class DicomProcessor:
     
     def __init__(self):
         # 路径配置
-        self.CONVERTED_FOLDER_NAME = 'converted' # 仅保留名称 (可选)
+        self.CONVERTED_FOLDER_NAME = 'converted'
         self.SEGMENTED_FOLDER_NAME = 'ROI'
         self.ALLOWED_EXTENSIONS = {'dcm'}
         
@@ -117,13 +66,11 @@ class DicomProcessor:
 
     def _create_required_directories(self):
         """创建处理DICOM文件所需的所有目录"""
-        # 使用 ALL_OUTPUT_DIRS 常量列表
+        
         for directory_path in ALL_OUTPUT_DIRS:
             try:
-                # 优先使用 Pathlib
                 directory_path.mkdir(parents=True, exist_ok=True)
             except Exception as e:
-                # 兜底处理
                 os.makedirs(str(directory_path), exist_ok=True)
 
     
@@ -175,8 +122,6 @@ class DicomProcessor:
         
         返回: 包含处理结果路径和肾脏计数信息的字典
         """
-        # 注意: 依赖于外部导入的函数 (preprocess, predict, ROI, overlay, graph)
-        # 实际代码中需要确保这些模块可用
         
         print(f"步骤1: 检查DICOM类型并处理: {dicom_path}")
         dicom_data = pydicom.dcmread(dicom_path)
@@ -185,30 +130,24 @@ class DicomProcessor:
         if is_multiframe:
             print(f"检测到多帧DICOM，提取第{frame_number}帧...")
             original_dcm_path, _ = extract_frame(dicom_path, frame_number)
-            # original_dcm_path = dicom_path # 模拟，实际应为提取后的单帧路径
         else:
             print("检测到单帧DICOM，直接处理...")
             original_dcm_path = dicom_path
         
         # 使用 CONVERTED_OUTPUT_DIR
         png_filename = f"{patient_name}_{frame_number}_resampled.png" 
-        png_path_abs = str(CONVERTED_OUTPUT_DIR / png_filename) # 完整的绝对路径字符串
+        png_path_abs = str(CONVERTED_OUTPUT_DIR / png_filename)
 
         print("步骤2: 重采样DICOM...")
         resampled_dcm_path, _, png_path = resample_dicom(original_dcm_path, output_png_path=png_path_abs, order=1)
-        # resampled_dcm_path = "output/resampled.dcm" # 模拟结果
-        # png_path = os.path.join(self.CONVERTED_FOLDER, "image.png") # 模拟结果
         
         print("步骤3-4: 进行肾脏分割和ROI添加...")
         overlay_filename = f"{patient_name}_roi_overlay.png"
         overlay_path_abs = str(SEGMENTED_OUTPUT_DIR / overlay_filename)
         segmentation_path, _ = segment_kidney(resampled_dcm_path, model_path, img_size=224, num_classes=3)
         roi_path, roi_data = add_background_roi(segmentation_path)
-        # segmentation_path = "output/segmentation/result.dcm" # 模拟结果
-        # _, roi_data = add_background_roi(segmentation_path) # 模拟调用
         
         overlay_path = display_dicom_with_roi_overlay(resampled_dcm_path, roi_data, output_path=overlay_path_abs)
-        # overlay_path = os.path.join(self.SEGMENTED_FOLDER, "overlay_image.png") # 模拟结果
         
         print("步骤5: 计算肾脏计数和生成曲线...")
         graph_filename = f"{patient_name}_counts_curve.png"
@@ -216,9 +155,8 @@ class DicomProcessor:
         left_kidney_count, right_kidney_count, left_background_count, right_background_count, graph_path = graph(
             dicom_path, 
             roi_data,
-            output_path=graph_path_abs # 传入绝对路径
+            output_path=graph_path_abs 
         )
-        # left_kidney_count, right_kidney_count, left_background_count, right_background_count, graph_path = graph(dicom_path, roi_data) # 模拟调用
         
         print(f"左肾计数: {left_kidney_count}, 右肾计数: {right_kidney_count}")
         
@@ -232,7 +170,7 @@ class DicomProcessor:
         return {
             'png_path': png_path,
             'overlay_path': overlay_path,
-            'graph_path': graph_path, # 返回绝对路径
+            'graph_path': graph_path,
             'kidney_counts': kidney_counts
         }
 
@@ -384,15 +322,14 @@ class DicomProcessor:
         """
         input_path = Path(dicom_input_path)
         
-        # 1. 调用 process_ct_input 获取模型深度和路径信息 (已处理文件复制和标准化路径)
-        # 假设 process_ct_input 已被正确导入
+        # 调用 process_ct_input 获取模型深度和路径信息
         model_depth_result = process_ct_input(input_path)
         
         if not model_depth_result['success']:
             # 如果模型深度计算失败，直接返回失败信息
             return model_depth_result
             
-        # 2. 确定用于提取 DICOM 元数据的路径
+        # 确定用于提取 DICOM 元数据的路径
         # process_ct_input 的结果中，'originalDicomPath' 总是指向最深切片 (系列) 或原始文件 (单文件) 的备份路径
         target_dcm_path = model_depth_result.get('originalDicomPath')
         
@@ -405,10 +342,10 @@ class DicomProcessor:
                 # 读取 DICOM 元数据
                 ds = pydicom.dcmread(target_dcm_path, force=True)
                 
-                # 3. 提取患者人体测量数据
+                # 提取患者人体测量数据
                 height, weight, age, sex, used_previous = self._get_patient_anthropometric_data(ds)
                 
-                # 4. 尝试计算李氏深度
+                # 尝试计算李氏深度
                 if all(v is not None for v in [height, weight, age, sex]):
                     li_L, li_R = self._calculate_li_depth(height, weight, age, sex)
                     li_depth_L = li_L if li_L is not None else "N/A"
@@ -423,7 +360,7 @@ class DicomProcessor:
                 print(f"李氏深度计算/DICOM读取失败: {e}")
                 # 即使李氏深度失败，也应返回模型深度结果
         
-        # 5. 整合最终结果
+        # 整合最终结果
         final_result = {
             'success': True,
             # 模型深度结果 (字段名统一为 model/Li 前缀)
@@ -445,7 +382,7 @@ class DicomProcessor:
              final_result['deepestSliceName'] = model_depth_result.get('deepestSliceName')
              final_result['maxOverallDepthMm'] = model_depth_result.get('maxOverallDepthMm')
 
-        # 6. 更新 DicomProcessor 的内部状态 (供 GFR 计算使用)
+        # 更新 DicomProcessor 的内部状态 (供 GFR 计算使用)
         # 将模型深度存入内部状态，供 calculate_gfr 使用
         self.kidney_depths['leftDepth'] = final_result['modelLeftDepth']
         self.kidney_depths['rightDepth'] = final_result['modelRightDepth']
@@ -511,10 +448,10 @@ class DicomProcessor:
         此方法不接受参数，它直接使用 DicomProcessor 的内部状态。
         """
         
-        # 1. 初始化结果字典
+        # 初始化结果字典
         upload_result = {'success': False, 'message': '未执行任何操作'}
         
-        # 2. 尝试计算李氏深度 (前提是 CT 深度和患者信息均可用)
+        # 尝试计算李氏深度 (前提是 CT 深度和患者信息均可用)
         height = self.last_patient_info.get('height') # 假设单位是米 (m)
         weight = self.last_patient_info.get('weight') # 假设单位是千克 (kg)
         age = self.last_patient_info.get('age')
@@ -527,7 +464,7 @@ class DicomProcessor:
         
         if is_patient_info_valid and isinstance(ct_L, (int, float)) and isinstance(ct_R, (int, float)):
             
-            # 确保将身高转换为 _calculate_li_depth 所需的单位 (假设是 cm)
+            # 确保将身高转换为 _calculate_li_depth 所需的单位
             height_cm = height * 100 
             
             Li_L, Li_R = self._calculate_li_depth(
@@ -543,11 +480,8 @@ class DicomProcessor:
         else:
             upload_result['LiDepthMessage'] = "患者信息或 CT 深度缺失，跳过李氏深度计算。"
         
-        # 3. 数据上传/持久化 (此处为您具体的业务逻辑)
+        # 3. 数据上传/持久化 
         try:
-            # 示例：将所有深度结果 (kidney_depths) 和患者信息上传/保存
-            # 例如：self._save_depth_results_to_db(self.last_patient_info, self.kidney_depths)
-            
             upload_result['success'] = True
             upload_result['message'] = "深度数据处理和上传成功。"
             # 返回完整的深度数据，用于 GUI 更新
@@ -630,67 +564,3 @@ class DicomProcessor:
             }
         }
 
-# --- 示例用法 (作为模块被调用时) ---
-if __name__ == '__main__':
-    # 假设的 DICOM 文件路径 (需要替换为实际文件)
-    DYNAMIC_DICOM_PATH = "path/to/kidney_dynamic_study.dcm"
-    CT_DICOM_PATH = "/home/kevin/Documents/GFR/CT_all/CT11"
-    
-    # 1. 初始化处理器
-    processor = DicomProcessor(upload_folder='temp_uploads', base_url='/static')
-    
-    print("\n--- 1. 处理肾动态显像 DICOM ---")
-    # 模拟文件存在
-    if not os.path.exists(DYNAMIC_DICOM_PATH):
-        print(f"注意: 动态显像文件 '{DYNAMIC_DICOM_PATH}' 不存在，使用模拟数据。")
-        # 模拟设置状态以进行后续 GFR 计算
-        processor.last_manufacturer = 'GE MEDICAL SYSTEMS'
-        processor.last_kidney_counts = {'leftKidneyCount': 150000, 'rightKidneyCount': 140000, 
-                                        'leftBackgroundCount': 5000, 'rightBackgroundCount': 4500}
-        processor.last_patient_info = {'name': 'TESTPATIENT', 'sex': '男', 'age': '45', 'height': 1.75, 'weight': 70.5, 'manufacturer': 'GE MEDICAL SYSTEMS', 'date': '20250101'}
-        dynamic_result = {'success': True, 'message': '模拟动态显像处理成功'}
-    else:
-        dynamic_result = processor.process_dynamic_study_dicom(DYNAMIC_DICOM_PATH)
-    
-    print("动态显像处理结果:", dynamic_result)
-    
-    print("\n--- 2. 处理 CT 深度 DICOM ---")
-    # 模拟文件存在
-    if not os.path.exists(CT_DICOM_PATH):
-        print(f"注意: CT 文件 '{CT_DICOM_PATH}' 不存在，使用模拟深度数据。")
-        # 模拟设置状态以进行后续 GFR 计算
-        processor.kidney_depths['leftDepth'] = 75.2
-        processor.kidney_depths['rightDepth'] = 70.8
-        
-        # 模拟李氏深度计算 (需依赖 patient_info)
-        height_cm = 175.0
-        weight_kg = 70.5
-        age_y = 45
-        sex_M_F = 'M'
-        Li_L, Li_R = processor._calculate_li_depth(height_cm, weight_kg, age_y, sex_M_F)
-        processor.kidney_depths['LiLeftKidneyDepth'] = Li_L
-        processor.kidney_depths['LiRightKidneyDepth'] = Li_R
-        depth_result = {'success': True, 'message': '模拟深度计算成功', 'kidneyDepth': processor.kidney_depths}
-    else:
-        depth_result = processor.process_depth_dicom(CT_DICOM_PATH)
-    
-    print("CT 深度处理结果:", depth_result)
-
-    print("\n--- 3. 计算 GFR (使用模型/CT深度) ---")
-    if processor.kidney_depths['leftDepth'] and processor.last_kidney_counts:
-        gfr_result = processor.calculate_gfr(depth_method='model')
-        print("GFR 计算结果:", gfr_result)
-    else:
-        print("GFR 计算条件不足。")
-        
-    print("\n--- 4. 演示手动上传深度和计算李氏深度 ---")
-    manual_depth_result = processor.upload_depth_and_calculate_li(
-        left_depth=72.0, right_depth=68.0, 
-        height_m=1.80, weight_kg=80.0, age_y=50, sex_cn='男'
-    )
-    print("手动上传结果:", manual_depth_result)
-    
-    print("\n--- 5. 计算 GFR (使用手动/李氏深度) ---")
-    if processor.kidney_depths['leftDepth'] and processor.last_kidney_counts:
-        gfr_result_manual = processor.calculate_gfr(depth_method='li')
-        print("GFR (基于手动/新李氏) 计算结果:", gfr_result_manual)

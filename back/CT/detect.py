@@ -1,4 +1,4 @@
-# detect.py (仅保留核心逻辑和路径管理)
+# detect.py
 import os
 from pathlib import Path
 import numpy as np
@@ -6,10 +6,8 @@ import cv2
 import SimpleITK as sitk
 from ultralytics import YOLO
 from ultralytics.utils.plotting import Annotator, colors
-# 假设 constants.py 位于上一级目录的兄弟目录中，或者已正确导入
 from ..constants import ORIGINAL_CT_DIR , ORIGINAL_PNG_DIR , OVERLAY_PNG_DIR , YOLO_LABELS_DIR , ANALYSIS_RESULTS_DIR , DETECT_MODEL_WEIGHTS_PATH
 
-# --- 辅助函数 (保持不变) ---
 def get_first_int_from_metadata(image, key):
     """从DICOM元数据中获取第一个整数值"""
     try:
@@ -29,7 +27,6 @@ def adjust_window_level(img_array, window_center, window_width):
 
 def load_dicom_for_yolo(file_path: Path):
     """加载DICOM图像并返回适合YOLO处理的BGR格式图像和间距"""
-    # ... (与原始 load_dicom_image 逻辑相同)
     try:
         # 读取DICOM图像
         image = sitk.ReadImage(str(file_path))

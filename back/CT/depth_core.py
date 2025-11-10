@@ -8,18 +8,7 @@ import numpy as np
 from pathlib import Path
 from ..constants import ORIGINAL_CT_DIR , ORIGINAL_PNG_DIR , OVERLAY_PNG_DIR , YOLO_LABELS_DIR , ANALYSIS_RESULTS_DIR , DETECT_MODEL_WEIGHTS_PATH
 
-# --- 辅助函数 (保持不变: load_dicom_image, segment_body, extract_body_contour, get_coordinates, count_pixel, find_posterior_boundary) ---
-
-# **********************************************
-# * 请将 anatomical_segmentation.py 中的所有辅助函数
-# * load_dicom_image, segment_body, extract_body_contour, 
-# * get_coordinates, count_pixel, find_posterior_boundary 
-# * 复制到这里。
-# **********************************************
-
-# 假设所有辅助函数已复制到此
 def load_dicom_image(file_path):
-    # ... (从 anatomical_segmentation.py 复制)
     dicom_data = pydicom.dcmread(file_path)
     image = dicom_data.pixel_array
     slope = getattr(dicom_data, 'RescaleSlope', 1)
@@ -31,7 +20,6 @@ def load_dicom_image(file_path):
     return image, display_image
 
 def segment_body(image):
-    # ... (从 anatomical_segmentation.py 复制)
     body_mask = (image > -200).astype(np.uint8) * 255
     original_mask = body_mask.copy()
     kernel = np.ones((5, 5), np.uint8)
@@ -54,7 +42,6 @@ def segment_body(image):
     return body_mask
 
 def extract_body_contour(body_mask):
-    # ... (从 anatomical_segmentation.py 复制)
     contours, _ = cv2.findContours(body_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
     if not contours: return None
     body_contour = max(contours, key=cv2.contourArea)
@@ -63,7 +50,6 @@ def extract_body_contour(body_mask):
     return contour_image
 
 def get_coordinates(txt_path, image_width, image_height):
-    # ... (从 anatomical_segmentation.py 复制)
     coordinates = []
     with open(txt_path, 'r') as file:
         lines = file.readlines()
@@ -83,12 +69,10 @@ def get_coordinates(txt_path, image_width, image_height):
     return coordinates
 
 def count_pixel(file_path):
-    # ... (从 anatomical_segmentation.py 复制)
     file = sitk.ReadImage(file_path)
     return file.GetSpacing()[1]
 
 def find_posterior_boundary(contour_image, kidney_x, kidney_y):
-    # ... (从 anatomical_segmentation.py 复制)
     height, width = contour_image.shape
     if kidney_x < 0 or kidney_x >= width or kidney_y < 0 or kidney_y >= height:
         return None
@@ -110,7 +94,7 @@ def find_posterior_boundary(contour_image, kidney_x, kidney_y):
     
     boundary_y = int(np.median(boundary_points))
     return boundary_y
-# **********************************************
+
 
 def measure_kidney_depth(dicom_path: Path, txt_path: Path, is_deepest: bool = False) -> dict:
     """
