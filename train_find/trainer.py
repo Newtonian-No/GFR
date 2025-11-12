@@ -12,7 +12,7 @@ import logging
 import sys # 移植：用于日志
 from tqdm import tqdm # 移植：用于进度条
 from tensorboardX import SummaryWriter # 移植：用于 TensorBoard
-
+from scipy import ndimage
 # 假设这两个文件/类在当前环境中是可用的
 from .vit_seg_configs import get_r50_l16_config
 from .vit_seg_modeling_mamba import VisionTransformer 
@@ -25,21 +25,16 @@ TARGET_SIZE = 256    # 假设模型要求 256x256 输入
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
-def resize_transform(target_size=256):
-    # 将 NumPy 数组转为 Tensor，然后进行 Resize
-    return transforms.Compose([
-        # 1. Resize/Crop: 如果需要，将张量调整到目标大小
-        # 注意: torch.nn.functional.interpolate 或自定义的 Resize function 
-        # 必须在转换为 Tensor 后应用
-        
-        # 2. ToTensor: 假设您的 __getitem__ 已经返回 Tensor
-        # 如果不是，这一步应该在 __getitem__ 中完成
-    ])
 
 class KidneyDataset(Dataset):
-    def __init__(self, data_root_dir, transform=None):
+    def __init__(self, data_root_dir, transform=None , positive_ratio=0.8):
         self.transform = transform
         self.data_paths = []
+        # 存储所有含有目标（肾脏）的 2D 切片的索引：[(file_idx, slice_idx), ...]
+        self.positive_slices = [] 
+        # 存储所有 2D 切片的索引：[(file_idx, slice_idx), ...]
+        self.all_slices = [] 
+        self.positive_ratio = positive_ratio # 设定正样本抽取比例
         
         # 遍历主文件夹下的所有 CT 文件目录
         for case_dir in glob.glob(os.path.join(data_root_dir, 's*')):
@@ -60,51 +55,90 @@ class KidneyDataset(Dataset):
                     'right': right_kidney_path
                 })
 
+        logging.info("Scanning all NIfTI volumes to build positive/all slice index...")
+        self._build_slice_indices()
+
+    def _build_slice_indices(self):
+        """扫描所有 3D 体积，记录包含肾脏（正样本）和所有切片的索引。"""
+        self.positive_slices = []
+        self.all_slices = []
+
+        for file_idx, data in enumerate(tqdm(self.data_paths, desc="Indexing slices")):
+            # 1. 读取 CT 图像和标签
+            img_nii = nib.load(data['image'])
+            img_data = img_nii.get_fdata()
+            left_seg = nib.load(data['left']).get_fdata()
+            right_seg = nib.load(data['right']).get_fdata()
+            
+            # 2. 合并标签
+            segmentation_map = np.zeros_like(img_data, dtype=np.uint8)
+            segmentation_map[left_seg > 0] = 1 
+            segmentation_map[right_seg > 0] = 2 
+
+            # 3. 维度调整 (保持与 __getitem__ 中的逻辑一致)
+            if img_data.shape[2] > img_data.shape[0]: 
+                 # 假设读取是 [H, W, D]，转为 [D, H, W]
+                 segmentation_map = np.transpose(segmentation_map, (2, 0, 1))
+            
+            D = segmentation_map.shape[0]
+            
+            # 4. 遍历所有切片
+            for slice_idx in range(D):
+                self.all_slices.append((file_idx, slice_idx))
+                
+                # 检查切片中是否有肾脏 (类别 1 或 2)
+                slice_data = segmentation_map[slice_idx, :, :]
+                if np.any(slice_data == 1) or np.any(slice_data == 2):
+                    self.positive_slices.append((file_idx, slice_idx))
+        
+        logging.info(f"Total volumes: {len(self.data_paths)}")
+        logging.info(f"Total 2D slices: {len(self.all_slices)}")
+        logging.info(f"Total positive slices (containing kidney): {len(self.positive_slices)}")
+
     def __len__(self):
-        return len(self.data_paths)
+        return len(self.all_slices)
 
     def __getitem__(self, idx):
-        data = self.data_paths[idx]
+        # 1. 决定本次是否抽取正样本 (目标感知)
+        if np.random.rand() < self.positive_ratio and len(self.positive_slices) > 0:
+            # 抽取一个正样本切片
+            # 我们随机选择 self.positive_slices 中的一个索引
+            slice_info_idx = np.random.randint(len(self.positive_slices))
+            file_idx, slice_idx = self.positive_slices[slice_info_idx]
+        else:
+            # 抽取一个随机切片 (可以是有目标也可以是无目标)
+            # 我们从 self.all_slices 中选择一个索引
+            slice_info_idx = np.random.randint(len(self.all_slices))
+            file_idx, slice_idx = self.all_slices[slice_info_idx]
+            
+        # 2. 读取 3D 图像和标签数据
+        data = self.data_paths[file_idx]
         
-        # 1. 读取 CT 图像
+        # *注意：为了性能，这里最好是使用自定义 Collate_fn 或 Sampler 来处理 I/O 优化，
+        # 但为保证代码逻辑的完整性，我们接受在每次调用 __getitem__ 时进行 I/O 操作。
+        
         img_nii = nib.load(data['image'])
         img_data = img_nii.get_fdata().astype(np.float32)
-        
-        # 2. 读取标签 (Segmentation Masks)
         left_seg = nib.load(data['left']).get_fdata().astype(np.uint8)
         right_seg = nib.load(data['right']).get_fdata().astype(np.uint8)
         
-        # 3. 合并标签：创建单一的标签图（背景为0，左肾为1，右肾为2）
-        # 模型需要 K+1 个类别，这里是 3 个类别 (背景, 左肾, 右肾)
         segmentation_map = np.zeros_like(img_data, dtype=np.uint8)
-        segmentation_map[left_seg > 0] = 1 # 左肾标签为 1
-        segmentation_map[right_seg > 0] = 2 # 右肾标签为 2
+        segmentation_map[left_seg > 0] = 1 
+        segmentation_map[right_seg > 0] = 2 
 
-        # 确保数据维度是 [D, H, W] (假设我们沿着 D 轴切片)
-        # 您需要根据 nibabel 读取的实际轴顺序调整这里
+        # 3. 维度调整 (与 _build_slice_indices 中保持一致)
         if img_data.shape[2] > img_data.shape[0]: 
-             # 假设读取是 [H, W, D]，需要转为 [D, H, W]
              img_data = np.transpose(img_data, (2, 0, 1))
              segmentation_map = np.transpose(segmentation_map, (2, 0, 1))
         
-        D, H, W = img_data.shape
-        
-        # 4. 预处理开始
-
-        # 4.1. 强度归一化 (Z-Score)
-        img_data = (img_data - GLOBAL_MEAN) / GLOBAL_STD
-        
-        # 4.2. 随机抽取一个 2D 切片 (沿着深度 D 轴)
-        if D > 0:
-            slice_idx = np.random.randint(D)
-        else:
-            # 避免空切片错误
-            return self.__getitem__(np.random.randint(len(self)))
-
+        # 4. 提取切片 (使用之前确定的 slice_idx)
         image_slice = img_data[slice_idx, :, :] # 形状: [H, W]
         label_slice = segmentation_map[slice_idx, :, :] # 形状: [H, W]
 
-        # 4.3. 获取当前切片尺寸
+        # 5. 强度归一化 (Z-Score)
+        image_slice = (image_slice - GLOBAL_MEAN) / GLOBAL_STD
+
+        # 6. 获取当前切片尺寸
         current_H, current_W = image_slice.shape
         # 计算缩放因子
         zoom_factors = (TARGET_SIZE / current_H, TARGET_SIZE / current_W)
@@ -122,7 +156,7 @@ class KidneyDataset(Dataset):
                                    mode='nearest').astype(np.uint8)
 
 
-        # 5. 转换为 PyTorch Tensor (注意：现在是 2D 切片)
+        # 7. 转换为 PyTorch Tensor (注意：现在是 2D 切片)
         # 形状: [H, W] -> [C, H, W]
         image_tensor = torch.from_numpy(image_slice).unsqueeze(0) # [1, H, W]
         label_tensor = torch.from_numpy(label_slice).long()       # [H, W]
@@ -293,7 +327,7 @@ if __name__ == '__main__':
     logging.info(f"Using device: {device}")
 
     # 2. 数据加载
-    full_dataset = KidneyDataset(data_root_dir=args.data_root)
+    full_dataset = KidneyDataset(data_root_dir=args.data_root, positive_ratio=0.8)
     
     train_size = int(0.8 * len(full_dataset))
     val_size = len(full_dataset) - train_size

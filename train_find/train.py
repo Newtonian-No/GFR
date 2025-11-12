@@ -8,7 +8,7 @@ import torch.backends.cudnn as cudnn
 # 假设这些模块在您的环境中是可导入的
 from .vit_seg_modeling import VisionTransformer as ViT_seg
 from .vit_seg_modeling import CONFIGS as CONFIGS_ViT_seg
-from trainer import trainer_synapse # 从 trainer.py 导入 trainer_synapse 函数
+from .trainer import trainer_synapse # 从 trainer.py 导入 trainer_synapse 函数
 
 # 1. 定义命令行参数
 parser = argparse.ArgumentParser()
