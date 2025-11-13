@@ -346,4 +346,4 @@ if __name__ == '__main__':
     logging.info("Training complete.")
 
     # 5. 保存最终模型 (这里可以保留，也可以在 train_model 中处理)
-    # torch.save(model.state_dict(), 'kidney_segmenter_final.pth')
+    torch.save(model.state_dict(), 'kidney_segmenter_final.pth')
