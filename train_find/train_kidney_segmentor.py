@@ -8,8 +8,8 @@ import nibabel as nib
 import argparse
 import logging
 # 模型配置和模型主体
-from .vit_seg_configs import get_r50_l16_config
-from .vit_seg_modeling_mamba import VisionTransformer  # 主要模型类
+from .networks.vit_seg_configs import get_r50_l16_config
+from .networks.vit_seg_modeling_mamba import VisionTransformer  # 主要模型类
 import torch.nn.functional as F
 from torchvision import transforms
 from scipy import ndimage

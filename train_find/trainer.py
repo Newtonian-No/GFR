@@ -10,12 +10,13 @@ import nibabel as nib
 import argparse
 import logging
 import sys # 移植：用于日志
+import pydicom
 from tqdm import tqdm # 移植：用于进度条
 from tensorboardX import SummaryWriter # 移植：用于 TensorBoard
 from scipy import ndimage
 # 假设这两个文件/类在当前环境中是可用的
-from .vit_seg_configs import get_r50_l16_config
-from .vit_seg_modeling_mamba import VisionTransformer 
+from .networks.vit_seg_configs import get_r50_l16_config
+from .networks.vit_seg_modeling_mamba import VisionTransformer 
 # from .utils import DiceLoss # 如果您想使用 DiceLoss，需要导入它
 
 GLOBAL_MEAN = -60.0  # 示例值
@@ -25,38 +26,255 @@ TARGET_SIZE = 256    # 假设模型要求 256x256 输入
 # 设置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
+def read_dcm_to_numpy(dcm_path):
+    """
+    读取 DICOM 文件并转换为 numpy 数组 (内存中的 nii)。
+    处理 RescaleSlope 和 RescaleIntercept 以获得正确的 HU 值。
+    """
+    try:
+        ds = pydicom.dcmread(dcm_path)
+        pixel_array = ds.pixel_array.astype(np.float32)
+
+        # 转换为 HU 值 (Hounsfield Units)
+        intercept = getattr(ds, 'RescaleIntercept', 0.0)
+        slope = getattr(ds, 'RescaleSlope', 1.0)
+        
+        image_hu = pixel_array * slope + intercept
+        return image_hu
+    except Exception as e:
+        logging.error(f"Error reading DICOM {dcm_path}: {e}")
+        return np.zeros((TARGET_SIZE, TARGET_SIZE), dtype=np.float32)
+
 
 class KidneyDataset(Dataset):
-    def __init__(self, data_root_dir, transform=None , positive_ratio=0.8):
+    def __init__(self, data_root_dir, transform=None , positive_ratio=0.8 , data_structure='gfr'):
+        """
+        Args:
+            data_root_dir: 数据集根目录
+            transform: 数据增强
+            positive_ratio: 仅对 'extracted' 模式有效，控制正样本比例
+            data_structure: 'extracted' (3D NII) 或 'gfr' (2D DICOM)
+        """
         self.transform = transform
-        self.data_paths = []
-        # 存储所有含有目标（肾脏）的 2D 切片的索引：[(file_idx, slice_idx), ...]
-        self.positive_slices = [] 
-        # 存储所有 2D 切片的索引：[(file_idx, slice_idx), ...]
-        self.all_slices = [] 
-        self.positive_ratio = positive_ratio # 设定正样本抽取比例
+        self.data_root_dir = data_root_dir
+        self.data_structure = data_structure
+        self.positive_ratio = positive_ratio
         
-        # 遍历主文件夹下的所有 CT 文件目录
-        for case_dir in glob.glob(os.path.join(data_root_dir, 's*')):
-            image_path = os.path.join(case_dir, 'ct.nii.gz')
+        # 核心存储列表，其中的每个元素代表一个可以直接输入网络的样本信息
+        # 结构示例: {'type': '2d', 'img_path': '...', 'lbl_path': '...'} 
+        # 或 {'type': '3d', 'img_path': '...', 'l_path': '...', 'r_path': '...', 'slice_idx': 55}
+        self.sample_list = []
+
+        logging.info(f"Initializing KidneyDataset with structure: {self.data_structure}")
+
+        if self.data_structure == 'extracted':
+            # 3D NII 模式：需要预扫描切片并支持随机抽取
+            self._setup_extracted_data()
+        elif self.data_structure == 'gfr':
+            # 2D DCM 模式：无需抽取，直接加载所有对应文件
+            self._setup_gfr_data()
+        else:
+            raise ValueError(f"Unknown data_structure: {data_structure}")
+
+        logging.info(f"Dataset initialized. Total samples available: {len(self.sample_list)}")
+
+    def _setup_gfr_data(self):
+        """
+        针对 GFR 数据的构建逻辑：
+        1. 读取 images 下的 dcm 文件。
+        2. 读取 labels 下的对应文件 (假设也是 dcm 或支持的格式)。
+        3. 不进行随机抽取，所有文件都作为样本。
+        """
+        # 假设路径结构: data_root/images/*.dcm, data_root/labels/*.dcm
+        # 注意：这里的 data_root_dir 应该是具体的 train 或 test 目录 (例如 .../datasets/GFR/train)
+        images_dir = os.path.join(self.data_root_dir, 'images')
+        labels_dir = os.path.join(self.data_root_dir, 'labels')
+
+        if not os.path.exists(images_dir):
+            logging.error(f"GFR images dir not found: {images_dir}")
+            return
+
+        # 获取所有 DCM 文件
+        image_files = sorted(glob.glob(os.path.join(images_dir, '*.dcm')))
+        
+        for img_path in tqdm(image_files, desc="Loading GFR paths"):
+            file_name = os.path.basename(img_path)
+            # 假设 label 文件名与 image 文件名一致
+            lbl_path = os.path.join(labels_dir, file_name)
             
-            # 找到 segmentations 文件夹
-            seg_dir = os.path.join(case_dir, 'segmentations')
-            left_kidney_path = os.path.join(seg_dir, 'kidney_left.nii.gz')
-            right_kidney_path = os.path.join(seg_dir, 'kidney_right.nii.gz')
-
-            if os.path.exists(image_path) and \
-               os.path.exists(left_kidney_path) and \
-               os.path.exists(right_kidney_path):
-                
-                self.data_paths.append({
-                    'image': image_path,
-                    'left': left_kidney_path,
-                    'right': right_kidney_path
+            if os.path.exists(lbl_path):
+                self.sample_list.append({
+                    'type': '2d_gfr',
+                    'image_path': img_path,
+                    'label_path': lbl_path
                 })
+            else:
+                # 尝试寻找同名的 .png 或 .nii.gz 作为 fallback (如果 label 不是 dcm)
+                # 这里只演示 dcm 逻辑
+                logging.warning(f"Label not found for {file_name}, skipping.")
 
-        logging.info("Scanning all NIfTI volumes to build positive/all slice index...")
-        self._build_slice_indices()
+                
+    def _setup_extracted_data(self):
+        """
+        针对 extracted (3D NII) 数据的构建逻辑：
+        1. 扫描 sXXX/ct.nii.gz 及其对应的分割文件。
+        2. 预先读取 3D 标签，找出哪些切片包含肾脏（正样本）。
+        3. 根据 positive_ratio 构建样本列表。
+        """
+        # extracted 数据通常位于 datasets/extracted/sXXX
+        # 假设传入的 data_root_dir 已经是包含 sXXX 文件夹的父级目录
+        
+        case_dirs = glob.glob(os.path.join(self.data_root_dir, 's*'))
+        
+        # 临时存储用于构建的候选列表
+        all_slices_info = []      # 所有的切片 [(path_dict, slice_idx), ...]
+        positive_slices_info = [] # 仅包含目标的切片
+        
+        for case_dir in tqdm(case_dirs, desc="Scanning 3D Volumes"):
+            image_path = os.path.join(case_dir, 'ct.nii.gz')
+            left_path = os.path.join(case_dir, 'segmentations', 'kidney_left.nii.gz')
+            right_path = os.path.join(case_dir, 'segmentations', 'kidney_right.nii.gz')
+
+            if os.path.exists(image_path) and os.path.exists(left_path) and os.path.exists(right_path):
+                # 需要快速读取标签来确定哪些切片有用
+                # 优化：只读取 header 或者低分辨率加载，这里为准确性读取数据
+                try:
+                    # 仅加载标签数据以检查切片内容
+                    l_data = nib.load(left_path).get_fdata().astype(np.uint8)
+                    r_data = nib.load(right_path).get_fdata().astype(np.uint8)
+                    
+                    # 确保是 [D, H, W] 格式
+                    if l_data.shape[2] > l_data.shape[0]: # 假设原始是 [H, W, D]
+                         l_data = np.transpose(l_data, (2, 0, 1))
+                         r_data = np.transpose(r_data, (2, 0, 1))
+                    
+                    depth = l_data.shape[0]
+                    
+                    paths = {
+                        'image': image_path,
+                        'left': left_path,
+                        'right': right_path
+                    }
+
+                    for d in range(depth):
+                        # 检查当前切片是否有左肾或右肾
+                        has_kidney = np.any(l_data[d, ...]) or np.any(r_data[d, ...])
+                        
+                        item = {'paths': paths, 'slice_idx': d}
+                        all_slices_info.append(item)
+                        if has_kidney:
+                            positive_slices_info.append(item)
+                            
+                except Exception as e:
+                    logging.error(f"Error scanning {case_dir}: {e}")
+        # 构建最终的 sample_list
+        # 这里我们模拟一种"无限"或"基于Epoch"的采样策略
+        # 但为了适配 PyTorch Dataset __len__，我们需要固定列表长度。
+        # 策略：如果设定了 strict 模式，只取 positive；否则混合。
+        # 这里简单起见，我们将所有切片加入列表。但在 __getitem__ 里可以不使用 positive_ratio (那是 sampler 的事)，
+        # 或者我们在这里根据 ratio 重新采样。
+        
+        # 修改策略：为了简单且方便管理，我们将所有 slice 都作为潜在样本。
+        # 如果需要由 Trainer 控制正负样本比例，建议使用 WeightedRandomSampler。
+        # 但为了兼容原代码逻辑（在 Dataset 内部控制比例），我们在这里做一个技巧：
+        
+        # 仅仅为了让 __getitem__ 能够区分，我们存入所有切片。
+        # 如果您希望 strictly 按照 positive_ratio 训练，建议在训练 loop 中处理，
+        # 或者在这里仅保留 positive_slices_info。
+        
+        # 按照原代码意图，extracted 需要混合。
+        # 为了高效，我们直接使用所有含有肾脏的切片 + 等量的背景切片 (或者全部切片)。
+        # 此处逻辑：保存所有切片，标记是否为 positive，以便分析。
+        
+        for item in all_slices_info:
+            self.sample_list.append({
+                'type': '3d_extracted',
+                'paths': item['paths'],
+                'slice_idx': item['slice_idx']
+            })
+
+    def __len__(self):
+        return len(self.sample_list)
+
+    def __getitem__(self, idx):
+        sample = self.sample_list[idx]
+        
+        # -------------------------------------------------------
+        # 逻辑分支 A: Extracted (3D Nii, 需要切片)
+        # -------------------------------------------------------
+        if sample['type'] == '3d_extracted':
+            # 如果需要保持原有的 positive_ratio 随机性（即 idx 只是个触发器，实际数据随机取）
+            # 可以在这里覆写 idx。但标准的 PyTorch 做法是 Dataset 返回确定的 idx 数据。
+            # 假设我们严格遵循 idx：
+            
+            paths = sample['paths']
+            slice_idx = sample['slice_idx']
+            
+            # 读取数据 (这部分 I/O 会比较频繁，生产环境建议缓存 Nifti 对象或使用 LMDB)
+            img_obj = nib.load(paths['image'])
+            img_vol = img_obj.get_fdata().astype(np.float32)
+            
+            l_vol = nib.load(paths['left']).get_fdata().astype(np.uint8)
+            r_vol = nib.load(paths['right']).get_fdata().astype(np.uint8)
+            
+            # 维度校正 [H, W, D] -> [D, H, W]
+            if img_vol.shape[2] > img_vol.shape[0]:
+                img_vol = np.transpose(img_vol, (2, 0, 1))
+                l_vol = np.transpose(l_vol, (2, 0, 1))
+                r_vol = np.transpose(r_vol, (2, 0, 1))
+            
+            image_slice = img_vol[slice_idx, ...]
+            
+            # 合并 Mask: 左肾=1, 右肾=2
+            mask_slice = np.zeros_like(image_slice, dtype=np.uint8)
+            mask_slice[l_vol[slice_idx, ...] > 0] = 1
+            mask_slice[r_vol[slice_idx, ...] > 0] = 2
+
+        # -------------------------------------------------------
+        # 逻辑分支 B: GFR (2D DCM)
+        # -------------------------------------------------------
+        elif sample['type'] == '2d_gfr':
+            # 直接读取 DCM 转换为 Numpy
+            image_slice = read_dcm_to_numpy(sample['image_path'])
+            
+            # 读取标签
+            # 假设标签也是 dcm，像素值直接对应类别 (0, 1, 2)
+            # 如果标签是 PNG，可以使用 PIL.Image.open 读取
+            try:
+                label_dcm = pydicom.dcmread(sample['label_path'])
+                mask_slice = label_dcm.pixel_array.astype(np.uint8)
+                
+                # GFR 数据的 Mask 处理：
+                # 确保值是 0, 1, 2。有些标注可能是 0, 255 (二值)。
+                # 如果是二值且无法区分左右，默认设为 1 (左肾) 或者根据需求修改
+                if np.max(mask_slice) > 2: 
+                    # 简单的归一化处理，如果 mask 只有 0 和 255
+                    mask_slice = (mask_slice > 0).astype(np.uint8) # 变为 0 和 1
+                    # TODO: 如果 GFR 没有左右之分，这里可能需要全部设为 1
+            except Exception as e:
+                logging.error(f"Failed to load label {sample['label_path']}: {e}")
+                mask_slice = np.zeros_like(image_slice, dtype=np.uint8)
+
+        # -------------------------------------------------------
+        # 通用后处理 (归一化 -> 缩放 -> Tensor)
+        # -------------------------------------------------------
+        
+        # 1. 强度归一化
+        image_slice = (image_slice - GLOBAL_MEAN) / GLOBAL_STD
+        
+        # 2. 缩放 (Zoom) 到 TARGET_SIZE
+        h, w = image_slice.shape
+        if h != TARGET_SIZE or w != TARGET_SIZE:
+            scale_h = TARGET_SIZE / h
+            scale_w = TARGET_SIZE / w
+            image_slice = ndimage.zoom(image_slice, (scale_h, scale_w), order=3)
+            mask_slice = ndimage.zoom(mask_slice, (scale_h, scale_w), order=0, prefilter=False) # 最近邻插值
+
+        # 3. 转 Tensor
+        image_tensor = torch.from_numpy(image_slice).unsqueeze(0).float() # [1, H, W]
+        label_tensor = torch.from_numpy(mask_slice).long()                # [H, W]
+
+        return image_tensor, label_tensor
 
     def _build_slice_indices(self):
         """扫描所有 3D 体积，记录包含肾脏（正样本）和所有切片的索引。"""
@@ -95,75 +313,7 @@ class KidneyDataset(Dataset):
         logging.info(f"Total 2D slices: {len(self.all_slices)}")
         logging.info(f"Total positive slices (containing kidney): {len(self.positive_slices)}")
 
-    def __len__(self):
-        return len(self.all_slices)
-
-    def __getitem__(self, idx):
-        # 1. 决定本次是否抽取正样本 (目标感知)
-        if np.random.rand() < self.positive_ratio and len(self.positive_slices) > 0:
-            # 抽取一个正样本切片
-            # 我们随机选择 self.positive_slices 中的一个索引
-            slice_info_idx = np.random.randint(len(self.positive_slices))
-            file_idx, slice_idx = self.positive_slices[slice_info_idx]
-        else:
-            # 抽取一个随机切片 (可以是有目标也可以是无目标)
-            # 我们从 self.all_slices 中选择一个索引
-            slice_info_idx = np.random.randint(len(self.all_slices))
-            file_idx, slice_idx = self.all_slices[slice_info_idx]
-            
-        # 2. 读取 3D 图像和标签数据
-        data = self.data_paths[file_idx]
-        
-        # *注意：为了性能，这里最好是使用自定义 Collate_fn 或 Sampler 来处理 I/O 优化，
-        # 但为保证代码逻辑的完整性，我们接受在每次调用 __getitem__ 时进行 I/O 操作。
-        
-        img_nii = nib.load(data['image'])
-        img_data = img_nii.get_fdata().astype(np.float32)
-        left_seg = nib.load(data['left']).get_fdata().astype(np.uint8)
-        right_seg = nib.load(data['right']).get_fdata().astype(np.uint8)
-        
-        segmentation_map = np.zeros_like(img_data, dtype=np.uint8)
-        segmentation_map[left_seg > 0] = 1 
-        segmentation_map[right_seg > 0] = 2 
-
-        # 3. 维度调整 (与 _build_slice_indices 中保持一致)
-        if img_data.shape[2] > img_data.shape[0]: 
-             img_data = np.transpose(img_data, (2, 0, 1))
-             segmentation_map = np.transpose(segmentation_map, (2, 0, 1))
-        
-        # 4. 提取切片 (使用之前确定的 slice_idx)
-        image_slice = img_data[slice_idx, :, :] # 形状: [H, W]
-        label_slice = segmentation_map[slice_idx, :, :] # 形状: [H, W]
-
-        # 5. 强度归一化 (Z-Score)
-        image_slice = (image_slice - GLOBAL_MEAN) / GLOBAL_STD
-
-        # 6. 获取当前切片尺寸
-        current_H, current_W = image_slice.shape
-        # 计算缩放因子
-        zoom_factors = (TARGET_SIZE / current_H, TARGET_SIZE / current_W)
-
-        # 图像缩放：使用三次样条插值 (order=3)
-        image_slice = ndimage.zoom(image_slice, 
-                                   zoom=zoom_factors, 
-                                   order=3, 
-                                   mode='nearest').astype(np.float32)
-        
-        # 标签缩放：使用最近邻插值 (order=0)，以保持类别值不变
-        label_slice = ndimage.zoom(label_slice, 
-                                   zoom=zoom_factors, 
-                                   order=0, 
-                                   mode='nearest').astype(np.uint8)
-
-
-        # 7. 转换为 PyTorch Tensor (注意：现在是 2D 切片)
-        # 形状: [H, W] -> [C, H, W]
-        image_tensor = torch.from_numpy(image_slice).unsqueeze(0) # [1, H, W]
-        label_tensor = torch.from_numpy(label_slice).long()       # [H, W]
-        
-        # ... (如果 transform 存在，应用 transform) ...
-
-        return image_tensor, label_tensor
+    
     
 def setup_model(num_classes):
     # 使用您提供的配置文件

@@ -9,8 +9,8 @@ backend_code.tar.gz
 *.nii.gz
 *.tar.gz
 *.zip
-train_find/extracted/
-train_find/CT/
+train_find/datasets/
+train_find/results/
 back/testing/
 back/weights/
 *.tar.gz
