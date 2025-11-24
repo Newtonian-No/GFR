@@ -1,3 +1,4 @@
+# --- START OF FILE train.py ---
 import faulthandler
 faulthandler.enable()
 import argparse
@@ -15,7 +16,7 @@ from torch.utils.data import DataLoader
 from datetime import datetime
 
 # 引入自定义的数据集和模型
-# 请确保 train_find 文件夹在 python 的搜索路径中，或者该脚本在 train_find 的上一级目录运行
+# 注意：必须以模块方式运行 (-m) 才能解析相对导入
 from .dataloader import GFRDataset
 from .networks.vit_seg_configs import get_r50_l16_config
 from .networks.vit_seg_modeling_bimambaattention import VisionTransformer as TransUnet
@@ -37,16 +38,16 @@ def get_args():
     parser.add_argument('--save_interval', type=int, default=20, help='save model every X epochs')
     
     # 硬件参数
-    # parser.add_argument('--n_gpu', type=int, default=1, help='total gpu')
     parser.add_argument('--deterministic', type=int, default=1, help='whether use deterministic training')
-    parser.add_argument('--local_rank', type=int, default=-1, help='local rank for distributed training')
+    # local_rank 参数在使用 torch.distributed.launch 时会自动传入，但在 torchrun 环境变量模式下不一定需要，保留以防万一
+    parser.add_argument('--local-rank', type=int, default=-1, help='local rank for distributed training')
 
     args = parser.parse_args()
     return args
 
 def set_logging(args):
     if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
+        os.makedirs(args.output_dir, exist_ok=True)
     
     log_file = os.path.join(args.output_dir, f'log_{datetime.now().strftime("%Y%m%d_%H%M%S")}.txt')
     
@@ -67,33 +68,41 @@ def set_logging(args):
     logging.info(f"Training started. Logs saved to {log_file}")
     logging.info(f"Args: {args}")
 
-def trainer(args, model, snapshot_path):
-    # local_rank = int(os.environ["LOCAL_RANK"])
-    # torch.cuda.set_device(local_rank)
-    # dist.init_process_group(backend='nccl')
-    # 1. 数据加载
-    logging.info(f"Loading data from {args.root_path}")
-    db_train = GFRDataset(root_dir=args.root_path, split='train', img_size=args.img_size)
-    train_sampler = DistributedSampler(db_train)
-    trainloader = DataLoader(db_train, batch_size=args.batch_size, shuffle=False, num_workers=4, pin_memory=True, sampler=train_sampler)
+def trainer(args, model, snapshot_path, train_sampler):
     
-    logging.info(f"Train dataset length: {len(db_train)}")
+    # 1. 数据加载
+    # 注意：sampler 已经在 main 中创建并传入，这里只需要创建 DataLoader
+    # DataLoader 中的 shuffle 必须为 False，因为 sampler 已经处理了 shuffle
+    trainloader = DataLoader(
+        args.db_train, 
+        batch_size=args.batch_size, 
+        shuffle=False, 
+        num_workers=4, 
+        pin_memory=True, 
+        sampler=train_sampler
+    )
+    
+    if args.rank == 0:
+        logging.info(f"Train dataset length: {len(args.db_train)}")
     
     # 2. 优化器与损失函数
     optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
     criterion = torch.nn.CrossEntropyLoss()
     
     model.train()
-    iter_num = 0
-    max_iterations = args.max_epochs * len(trainloader)  # 用于学习率衰减或其他调度
     
-    logging.info(f"Start training: Total epochs: {args.max_epochs}, Batch size: {args.batch_size}")
+    if args.rank == 0:
+        logging.info(f"Start training: Total epochs: {args.max_epochs}, Batch size per GPU: {args.batch_size}")
 
     for epoch_num in range(args.max_epochs):
+        # [重要修正] DDP 必须在每个 epoch 开始前调用 set_epoch
+        train_sampler.set_epoch(epoch_num)
+        
         epoch_loss = 0.0
         for i_batch, sampled_batch in enumerate(trainloader):
             image_batch, label_batch = sampled_batch['image'], sampled_batch['label']
-            image_batch, label_batch = image_batch.cuda(), label_batch.cuda()
+            # 使用 non_blocking=True 可以稍微加速数据传输
+            image_batch, label_batch = image_batch.cuda(args.gpu, non_blocking=True), label_batch.cuda(args.gpu, non_blocking=True)
             
             optimizer.zero_grad()
             outputs = model(image_batch)
@@ -103,51 +112,52 @@ def trainer(args, model, snapshot_path):
             optimizer.step()
             
             epoch_loss += loss.item()
-            iter_num += 1
             
-            # 简单的进度打印，每20个batch打印一次
-            if i_batch % 20 == 0:
+            # 只在 Rank 0 打印日志
+            if args.rank == 0 and i_batch % 20 == 0:
                 logging.info(f'Epoch: {epoch_num}/{args.max_epochs} | Batch: {i_batch}/{len(trainloader)} | Loss: {loss.item():.6f}')
 
+        # 计算平均 Loss (这里的 Loss 是当前 GPU 的平均，严格来说应该 reduce 所有 GPU 的 loss 再平均，但作为监控通常不需要那么精确)
         avg_loss = epoch_loss / len(trainloader)
-        logging.info(f"==> Epoch {epoch_num} finished. Average Loss: {avg_loss:.6f}")
         
-        # 保存模型逻辑
-        if (epoch_num + 1) % args.save_interval == 0 and args.rank == 0: 
-            save_mode_path = os.path.join(snapshot_path, f'epoch_{epoch_num + 1}.pth')
-            # DDP 包装后，模型参数在 .module 中
-            torch.save(model.module.state_dict(), save_mode_path)
-            logging.info(f"Saved model to {save_mode_path}")
+        if args.rank == 0:
+            logging.info(f"==> Epoch {epoch_num} finished. Average Loss: {avg_loss:.6f}")
+        
+        # 保存模型逻辑 (只在 Rank 0 保存)
+        if args.rank == 0:
+            # 间隔保存
+            if (epoch_num + 1) % args.save_interval == 0: 
+                save_mode_path = os.path.join(snapshot_path, f'epoch_{epoch_num + 1}.pth')
+                torch.save(model.module.state_dict(), save_mode_path)
+                logging.info(f"Saved model to {save_mode_path}")
             
-        # 保存最新模型
-        if (epoch_num + 1) == args.max_epochs and args.rank == 0: 
-            save_mode_path = os.path.join(snapshot_path, 'epoch_last.pth')
-            torch.save(model.module.state_dict(), save_mode_path)
-            logging.info(f"Saved last model to {save_mode_path}")
+            # 保存最新模型
+            if (epoch_num + 1) == args.max_epochs: 
+                save_mode_path = os.path.join(snapshot_path, 'epoch_last.pth')
+                torch.save(model.module.state_dict(), save_mode_path)
+                logging.info(f"Saved last model to {save_mode_path}")
 
     return "Training Finished!"
 
 if __name__ == "__main__":
-    # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
-
     args = get_args()
     
+    # --- 1. DDP 初始化设置 ---
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
-        # 使用 torchrun 或 torch.distributed.launch 启动
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ['WORLD_SIZE'])
         args.gpu = int(os.environ['LOCAL_RANK'])
     else:
-        # Fallback for non-distributed run or single GPU
+        print("Not using distributed mode")
         args.rank = 0
         args.world_size = 1
         args.gpu = 0
 
     torch.cuda.set_device(args.gpu)
     dist.init_process_group(backend='nccl', init_method='env://', world_size=args.world_size, rank=args.rank)
-    dist.barrier()
-    args.n_gpu = args.world_size
-    # 随机种子设置
+    dist.barrier() # 等待所有进程初始化完毕
+    
+    # --- 2. 随机种子设置 ---
     if not args.deterministic:
         cudnn.benchmark = True
         cudnn.deterministic = False
@@ -160,50 +170,51 @@ if __name__ == "__main__":
     torch.manual_seed(args.seed)
     torch.cuda.manual_seed(args.seed)
 
-    # 配置日志和快照目录
+    # --- 3. 日志配置 (仅 Rank 0) ---
     if args.rank == 0:
         set_logging(args)
+    else:
+        # 非 Rank 0 进程不输出 INFO 日志，避免刷屏
+        logging.basicConfig(level=logging.WARNING)
+        
     snapshot_path = args.output_dir
+
+    # --- 4. 数据集初始化 ---
+    # 数据集初始化放在 main 中，方便创建 sampler
+    if args.rank == 0:
+        logging.info(f"Loading data from {args.root_path}")
     
-    # 模型配置初始化
+    db_train = GFRDataset(root_dir=args.root_path, split='train', img_size=args.img_size)
+    args.db_train = db_train # 传递给 trainer
+    train_sampler = DistributedSampler(db_train, shuffle=True) # shuffle=True 是默认的，但显式写出来更好
+
+    # --- 5. 模型配置与初始化 ---
     config = get_r50_l16_config()
     config.n_classes = args.num_classes
-    config.n_skip = 3 # R50通常用3个skip connection
+    config.n_skip = 3
     
-    # 这里的 patches.grid 可能需要在 config 中确认，如果不一致会导致 position embedding 报错
     if 'R50' in config.transformer.get('name', 'R50-ViT-B_16'):
          config.patches.grid = (int(args.img_size / 16), int(args.img_size / 16))
 
-    # 模型初始化
-    if torch.cuda.is_available():
-        # 检测到的 GPU 数量
-        n_gpu = torch.cuda.device_count()
-        # 显式告诉 PyTorch 要使用哪些设备 (0, 1)
-        device_ids = list(range(n_gpu)) 
-    else:
-        n_gpu = 0
-        device_ids = []
-        logging.warning("CUDA is not available. Training on CPU.")
-
-    args.n_gpu = n_gpu
-
-    logging.info("Initializing Model...")
-    net = TransUnet(config, img_size=args.img_size, num_classes=args.num_classes)
-    # 将模型移动到当前进程的 GPU 上
-    net.to(args.gpu) 
-    
-    # DDP 包装 (取代 DataParallel)
-    logging.info(f"Using DDP on rank {args.rank} on device {args.gpu}")
-    net = DDP(net, device_ids=[args.gpu])
-
-    # batch size 设置
-    # DDP 模式下，batch_size 是 'batch_size per gpu'，不需要乘以 n_gpu
-    args.batch_size = args.batch_size # 保持为 per-GPU batch size
     if args.rank == 0:
-        logging.info(f"Per-GPU batch size: {args.batch_size}. Total effective batch size: {args.batch_size * args.n_gpu}")
+        logging.info("Initializing Model...")
+        
+    net = TransUnet(config, img_size=args.img_size, num_classes=args.num_classes)
     
+    # SyncBN (可选): 如果显存允许且 batch size 较小，建议开启 SyncBN 以获得更好的统计量
+    # net = torch.nn.SyncBatchNorm.convert_sync_batchnorm(net)
     
-    # 如果有预训练权重，可以在这里加载
-    # net.load_from(torch.load('/models/R50-ViT-B_16.npz')) 
+    net.to(args.gpu)
+    
+    # DDP 包装
+    # find_unused_parameters=True 有时能解决一些计算图报错，但会轻微降低速度。如果报错设为 True
+    net = DDP(net, device_ids=[args.gpu]) # , find_unused_parameters=True)
 
-    trainer(args, net, snapshot_path)
+    if args.rank == 0:
+        logging.info(f"Model wrapped in DDP. Starting training loop...")
+
+    # --- 6. 开始训练 ---
+    trainer(args, net, snapshot_path, train_sampler)
+
+    # 清理进程组
+    dist.destroy_process_group()
