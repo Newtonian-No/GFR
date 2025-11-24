@@ -34,7 +34,7 @@ def get_args():
     parser.add_argument('--save_interval', type=int, default=20, help='save model every X epochs')
     
     # 硬件参数
-    parser.add_argument('--n_gpu', type=int, default=1, help='total gpu')
+    # parser.add_argument('--n_gpu', type=int, default=1, help='total gpu')
     parser.add_argument('--deterministic', type=int, default=1, help='whether use deterministic training')
 
     args = parser.parse_args()
@@ -107,18 +107,26 @@ def trainer(args, model, snapshot_path):
         # 保存模型逻辑
         if (epoch_num + 1) % args.save_interval == 0:
             save_mode_path = os.path.join(snapshot_path, f'epoch_{epoch_num + 1}.pth')
-            torch.save(model.state_dict(), save_mode_path)
+            if torch.cuda.device_count() > 1:
+                torch.save(model.module.state_dict(), save_mode_path)
+            else:
+                torch.save(model.state_dict(), save_mode_path)
             logging.info(f"Saved model to {save_mode_path}")
             
         # 保存最新模型
         if (epoch_num + 1) == args.max_epochs:
             save_mode_path = os.path.join(snapshot_path, 'epoch_last.pth')
-            torch.save(model.state_dict(), save_mode_path)
+            if torch.cuda.device_count() > 1:
+                torch.save(model.module.state_dict(), save_mode_path)
+            else:
+                torch.save(model.state_dict(), save_mode_path)
             logging.info(f"Saved last model to {save_mode_path}")
 
     return "Training Finished!"
 
 if __name__ == "__main__":
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+
     args = get_args()
     
     # 随机种子设置
@@ -148,8 +156,28 @@ if __name__ == "__main__":
          config.patches.grid = (int(args.img_size / 16), int(args.img_size / 16))
 
     # 模型初始化
+    if torch.cuda.is_available():
+        # 检测到的 GPU 数量
+        n_gpu = torch.cuda.device_count()
+        # 显式告诉 PyTorch 要使用哪些设备 (0, 1)
+        device_ids = list(range(n_gpu)) 
+    else:
+        n_gpu = 0
+        device_ids = []
+        logging.warning("CUDA is not available. Training on CPU.")
+
+    args.n_gpu = n_gpu
+
     logging.info("Initializing Model...")
-    net = TransUnet(config, img_size=args.img_size, num_classes=args.num_classes).cuda()
+    net = TransUnet(config, img_size=args.img_size, num_classes=args.num_classes)
+
+    if args.n_gpu > 1:
+        args.batch_size = args.batch_size * n_gpu
+        logging.info(f"Using {args.n_gpu} GPUs. Effective batch size: {args.batch_size}")
+        
+        net = torch.nn.DataParallel(net, device_ids=device_ids)
+
+    net.cuda()
     
     # 如果有预训练权重，可以在这里加载
     # net.load_from(torch.load('/models/R50-ViT-B_16.npz')) 
