@@ -14,7 +14,7 @@ from datetime import datetime
 # 引入自定义的数据集和模型
 # 依然保持相对导入，所以必须用 -m 运行
 from .dataloader import GFRDataset
-from .networks.vit_seg_configs import get_r50_l16_config
+from .networks.vit_seg_configs import get_r50_l16_config , get_r50_b16_config
 from .networks.vit_seg_modeling_bimambaattention import VisionTransformer as TransUnet
 
 def get_args():
@@ -125,7 +125,7 @@ if __name__ == "__main__":
     set_logging(args)
 
     # 模型初始化
-    config = get_r50_l16_config()
+    config = get_r50_b16_config()
     config.n_classes = args.num_classes
     config.n_skip = 3
     if 'R50' in config.transformer.get('name', 'R50-ViT-B_16'):

@@ -171,6 +171,7 @@ def get_testing():
     config.representation_size = None
     return config
 
+#11/25：用这个配置，跑通测试
 def get_r50_b16_config():
     """Returns the Resnet50 + ViT-B/16 configuration."""
     config = get_b16_config()
@@ -187,6 +188,7 @@ def get_r50_b16_config():
     config.n_skip = 3
     config.activation = 'softmax'
 
+    config.learning_rate = 3e-5
     return config
 
 # def get_r50_b16_config():
