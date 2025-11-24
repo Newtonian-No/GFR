@@ -97,10 +97,11 @@ class BiMambaBlock(nn.Module):
         # x shape: [B, L, D]
         
         # 前向处理
-        x_fwd = self.mamba_fwd(x)
+        x_fwd = self.mamba_fwd(x.contiguous())
         
         # 后向处理：先翻转序列，处理完后再翻转回来
-        x_bwd = self.mamba_bwd(x.flip(dims=[1])).flip(dims=[1])
+        x_reversed = x.flip(dims=[1]).contiguous()
+        x_bwd = self.mamba_bwd(x_reversed).flip(dims=[1])
         
         # 拼接
         x_cat = torch.cat([x_fwd, x_bwd], dim=-1)

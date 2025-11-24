@@ -1,3 +1,5 @@
+import faulthandler
+faulthandler.enable()
 import argparse
 import logging
 import os
@@ -65,7 +67,7 @@ def trainer(args, model, snapshot_path):
     # 1. 数据加载
     logging.info(f"Loading data from {args.root_path}")
     db_train = GFRDataset(root_dir=args.root_path, split='train', img_size=args.img_size)
-    trainloader = DataLoader(db_train, batch_size=args.batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    trainloader = DataLoader(db_train, batch_size=args.batch_size, shuffle=True, num_workers=0, pin_memory=True)
     
     logging.info(f"Train dataset length: {len(db_train)}")
     
