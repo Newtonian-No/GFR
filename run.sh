@@ -1,20 +1,21 @@
 #!/bin/bash
 
-# 设置使用的 GPU ID，例如使用 0号和 1号 GPU
 export CUDA_VISIBLE_DEVICES=0,1
-
-# 这里的 nproc_per_node 应该等于上面可见 GPU 的数量
 NUM_GPUS=2
-
-# 设置 PYTHONPATH 确保 python 能找到 train_find 包
-# $(pwd) 表示当前目录，假设你在 train_find 的上一级目录运行此脚本
 export PYTHONPATH=$(pwd):$PYTHONPATH
 
-# 运行命令
-# --nproc_per_node: 单机多卡数量
-# --master_port: 防止端口冲突，可以随机指定一个
-# -m train_find.train: 以模块方式运行 train_find 包下的 train.py
-torchrun --nproc_per_node=$NUM_GPUS --master_port=29500 \
+# === 新增以下环境变量 ===
+# 禁用 P2P 通信（解决段错误的核心）
+export NCCL_P2P_DISABLE=1
+# 禁用 InfiniBand（如果不是跨节点训练，通常不需要 IB）
+export NCCL_IB_DISABLE=1
+# 如果你是通过 Ethernet 联网，可能需要强制指定网卡（可选，如果上面两个不行再加）
+# export NCCL_SOCKET_IFNAME=eth0 
+
+# 开启调试日志，如果还报错可以看到更详细原因
+export NCCL_DEBUG=INFO
+
+torchrun --nproc_per_node=$NUM_GPUS --master_port=29505 \
     -m train_find.train \
     --root_path '/home/cu01/Code/GFR/train_find/datasets/GFR/' \
     --batch_size 8 \

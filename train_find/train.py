@@ -153,8 +153,8 @@ if __name__ == "__main__":
         args.world_size = 1
         args.gpu = 0
 
-    torch.cuda.set_device(args.gpu)
     dist.init_process_group(backend='nccl', init_method='env://', world_size=args.world_size, rank=args.rank)
+    torch.cuda.set_device(args.gpu)
     dist.barrier() # 等待所有进程初始化完毕
     
     # --- 2. 随机种子设置 ---
