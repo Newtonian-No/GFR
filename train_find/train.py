@@ -207,7 +207,7 @@ if __name__ == "__main__":
     net.to(args.gpu)
     
     # DDP 包装
-    # find_unused_parameters=True 有时能解决一些计算图报错，但会轻微降低速度。如果报错设为 True
+    find_unused_parameters=True 
     net = DDP(net, device_ids=[args.gpu]) # , find_unused_parameters=True)
 
     if args.rank == 0:

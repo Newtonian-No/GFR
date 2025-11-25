@@ -11,8 +11,6 @@ import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader
 from datetime import datetime
 
-# 引入自定义的数据集和模型
-# 依然保持相对导入，所以必须用 -m 运行
 from .dataloader import GFRDataset
 from .networks.vit_seg_configs import get_r50_l16_config , get_r50_b16_config
 from .networks.vit_seg_modeling_bimambaattention import VisionTransformer as TransUnet
@@ -48,15 +46,14 @@ def set_logging(args):
     logging.info(f"Single GPU Training started. Logs: {log_file}")
 
 def trainer(args, model, device):
-    # 1. 数据加载 (单卡模式不需要 DistributedSampler)
+    # 1. 数据加载 
     logging.info(f"Loading data from {args.root_path}")
     db_train = GFRDataset(root_dir=args.root_path, split='train', img_size=args.img_size)
     
-    # 直接在 DataLoader 中 shuffle=True
     trainloader = DataLoader(
         db_train, 
         batch_size=args.batch_size, 
-        shuffle=True,  # <--- 关键点：单卡训练开启 Shuffle
+        shuffle=True,
         num_workers=4, 
         pin_memory=True
     )
@@ -103,7 +100,7 @@ if __name__ == "__main__":
     
     # 设定使用的 GPU
     if torch.cuda.is_available():
-        device = torch.device("cuda:0") # 默认使用可见的第0号卡
+        device = torch.device("cuda:0")
         logging.info("Using GPU: cuda:0")
     else:
         device = torch.device("cpu")
