@@ -73,8 +73,31 @@ class DicomGFRApp:
         self.style.configure('Accent.TButton', foreground='white', background='#0078D7') # 突出显示主要操作
         # ------------------------------------
 
+        # --- 滚动容器，防止内容超出屏幕 ---
+        self.main_canvas = tk.Canvas(master, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(master, orient="vertical", command=self.main_canvas.yview)
+        self.main_canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.scrollbar.pack(side="right", fill="y")
+        self.main_canvas.pack(side="left", fill="both", expand=True)
+
+        self.scrollable_frame = ttk.Frame(self.main_canvas)
+        
+        # 绑定画布大小变化事件，使 scrollable_frame 宽度跟随画布
+        def on_canvas_configure(event):
+            canvas_width = event.width
+            self.main_canvas.itemconfig(self.canvas_window, width=canvas_width)
+        
+        def on_frame_configure(event):
+            self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
+        
+        self.main_canvas.bind("<Configure>", on_canvas_configure)
+        self.scrollable_frame.bind("<Configure>", on_frame_configure)
+        
+        self.canvas_window = self.main_canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.main_canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
         # --- 界面切换容器 ---
-        self.main_container = ttk.Frame(master)
+        self.main_container = ttk.Frame(self.scrollable_frame)
         self.main_container.pack(side="top", fill="both", expand=True, padx=10, pady=(10, 0))
         
         self.frames = {}
@@ -94,13 +117,20 @@ class DicomGFRApp:
         self.main_container.grid_columnconfigure(0, weight=1)
 
         # 底部日志和状态区 (保持在主窗口底部)
-        self.create_log_status_area()
+        self.create_log_status_area(self.scrollable_frame)
 
         # 显示主菜单
         self.show_frame("MainMenu")
         
         # 初始状态显示
         self.display_status()
+        
+        # 窗口初始化完成后，更新画布和滚动区域
+        master.update_idletasks()
+        canvas_width = self.main_canvas.winfo_width()
+        if canvas_width > 1:  # 确保画布已初始化
+            self.main_canvas.itemconfig(self.canvas_window, width=canvas_width)
+            self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
 
     # --- 界面切换逻辑 ---
     def show_frame(self, page_name):
@@ -110,9 +140,9 @@ class DicomGFRApp:
         self.log_message(f"\n[系统提示] 已切换到: {page_name}")
         
     # --- 统一的日志和状态区 ---
-    def create_log_status_area(self):
+    def create_log_status_area(self, parent):
         """创建通用的日志和状态显示区"""
-        log_frame = ttk.LabelFrame(self.master, text="操作日志与状态结果:", padding=(10, 5))
+        log_frame = ttk.LabelFrame(parent, text="操作日志与状态结果:", padding=(10, 5))
         log_frame.pack(fill="x", padx=10, pady=(0, 10))
 
         # 1. 创建内容框架，使用 Grid 实现左右布局
@@ -159,6 +189,14 @@ class DicomGFRApp:
         self.master.config(cursor="watch") # 更改光标为等待状态
         thread = threading.Thread(target=target_func, args=args, kwargs=kwargs, daemon=True)
         thread.start()
+
+    def _on_mousewheel(self, event):
+        """允许整体界面滚动，防止底部内容被遮挡。"""
+        if hasattr(event, "delta") and event.delta:
+            self.main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        elif hasattr(event, "num") and event.num in (4, 5):
+            direction = -1 if event.num == 4 else 1
+            self.main_canvas.yview_scroll(direction, "units")
 
     def after_thread_completion(self, result, task_name):
         """线程完成后在主线程中更新 UI"""
@@ -459,12 +497,12 @@ class FeatureFrameBase(ttk.Frame):
 
         # ------------------- 路径和文件检查 -------------------
         if not image_path:
-            label.config(image='')
+            label.config(image='', text="暂无图像\n(等待加载...)")
             label.image = None
             return
 
         if not os.path.exists(image_path):
-            label.config(image='')
+            label.config(image='', text="暂无图像\n(文件不存在)")
             label.image = None
             return
 
@@ -518,6 +556,7 @@ class DynamicStudyFrame(FeatureFrameBase):
         self.count_labels = {} 
         self.image_tk_references = {} 
         self.image_display_size = (500, 500)
+        self.half_metric_labels = {}
         super().__init__(parent, controller, "1. 处理肾动态显像 DICOM")
 
     def create_widgets(self):
@@ -550,9 +589,13 @@ class DynamicStudyFrame(FeatureFrameBase):
         top_row = ttk.Frame(result_frame)
         top_row.pack(fill='both', expand=True)
         
-        # 底部两栏
-        bottom_row = ttk.Frame(result_frame)
-        bottom_row.pack(fill='both', expand=True)
+        # 中间两栏
+        middle_row = ttk.Frame(result_frame)
+        middle_row.pack(fill='both', expand=True)
+        
+        # 底部两栏（半排曲线 + 指标）
+        half_row = ttk.Frame(result_frame)
+        half_row.pack(fill='both', expand=True)
 
         # 1. 原始肾动态显像 (左上)
         self.original_image_frame = self._create_result_panel(top_row, "原始肾动态显像", "original")
@@ -563,12 +606,20 @@ class DynamicStudyFrame(FeatureFrameBase):
         self.curve_image_frame.pack(side=tk.LEFT, fill='both', expand=True, padx=5, pady=5)
 
         # 3. ROI 勾画结果 (左下)
-        self.roi_image_frame = self._create_result_panel(bottom_row, "ROI 勾画结果", "roi")
+        self.roi_image_frame = self._create_result_panel(middle_row, "ROI 勾画结果", "roi")
         self.roi_image_frame.pack(side=tk.LEFT, fill='both', expand=True, padx=5, pady=5)
         
-        # 4. 肾脏放射性计数表 (右下)
-        self.count_table_frame = self._create_count_table_panel(bottom_row)
+        # 4. 肾脏放射性计数表 (右中)
+        self.count_table_frame = self._create_count_table_panel(middle_row)
         self.count_table_frame.pack(side=tk.LEFT, fill='both', expand=True, padx=5, pady=5)
+        
+        # 5. 半排率/时间曲线 (左下)
+        self.half_curve_frame = self._create_result_panel(half_row, "半排率/半排时间曲线", "halfcurve")
+        self.half_curve_frame.pack(side=tk.LEFT, fill='both', expand=True, padx=5, pady=5)
+        
+        # 半排指标表 (右下)
+        self.half_metrics_frame = self._create_half_metrics_panel(half_row)
+        self.half_metrics_frame.pack(side=tk.LEFT, fill='both', expand=True, padx=5, pady=5)
 
     # 核心处理逻辑
     def handle_convert_dicom(self):
@@ -634,7 +685,75 @@ class DynamicStudyFrame(FeatureFrameBase):
         frame.grid_columnconfigure(2, weight=1)
         
         return frame
+
+    def _create_half_metrics_panel(self, parent):
+        """创建用于显示半排指标的面板。"""
+        frame = ttk.LabelFrame(parent, text="半排指标", padding=10)
+
+        ttk.Label(frame, text="指标", font=self.controller.button_font).grid(row=0, column=0, padx=10, pady=5, sticky='ew')
+        ttk.Label(frame, text="左肾", font=self.controller.button_font).grid(row=0, column=1, padx=10, pady=5, sticky='ew')
+        ttk.Label(frame, text="右肾", font=self.controller.button_font).grid(row=0, column=2, padx=10, pady=5, sticky='ew')
+
+        rows = [
+            ("半排时间 (min)", 'leftHalfTime', 'rightHalfTime'),
+            ("半排率 (1/min)", 'leftHalfRate', 'rightHalfRate'),
+            ("是否达到50%", 'leftHalfReached', 'rightHalfReached')
+        ]
+
+        for idx, (label_text, left_key, right_key) in enumerate(rows, start=1):
+            ttk.Label(frame, text=label_text).grid(row=idx, column=0, padx=10, pady=5, sticky='w')
+            left_label = ttk.Label(frame, text="N/A")
+            right_label = ttk.Label(frame, text="N/A")
+            left_label.grid(row=idx, column=1, padx=10, pady=5, sticky='e')
+            right_label.grid(row=idx, column=2, padx=10, pady=5, sticky='e')
+            self.half_metric_labels[left_key] = left_label
+            self.half_metric_labels[right_key] = right_label
+
+        frame.grid_columnconfigure(1, weight=1)
+        frame.grid_columnconfigure(2, weight=1)
+        return frame
+
+    def _update_half_metrics(self, metrics):
+        """更新半排指标内容。"""
+        default_text = "N/A"
+        if not metrics:
+            # 如果 metrics 为 None 或空，将所有标签设置为 N/A
+            for label in self.half_metric_labels.values():
+                label.config(text=default_text)
+            # 如果是 None（单帧 DICOM），在日志中提示
+            if metrics is None:
+                self.controller.log_message("[提示] 单帧 DICOM 无法计算半排时间/半排率，需要多帧时间序列数据。")
+            return
+
+        left = metrics.get('left', {})
+        right = metrics.get('right', {})
+
+        def fmt(value, unit=""):
+            if value is None:
+                return default_text
+            return f"{value}{unit}" if not isinstance(value, str) else value
+
+        self.half_metric_labels['leftHalfTime'].config(text=fmt(left.get('t_half'), " min"))
+        self.half_metric_labels['rightHalfTime'].config(text=fmt(right.get('t_half'), " min"))
+        self.half_metric_labels['leftHalfRate'].config(text=fmt(left.get('half_rate'), " 1/min"))
+        self.half_metric_labels['rightHalfRate'].config(text=fmt(right.get('half_rate'), " 1/min"))
+
+        left_reached = "是" if left.get('reached_half') else "否"
+        right_reached = "是" if right.get('reached_half') else "否"
+        self.half_metric_labels['leftHalfReached'].config(text=left_reached)
+        self.half_metric_labels['rightHalfReached'].config(text=right_reached)
         
+        # 没有达到50%日志说明
+        if not left.get('reached_half') or not right.get('reached_half'):
+            peak_info = []
+            if left.get('peak_value') and left.get('target_value'):
+                peak_info.append(f"左肾峰值: {left.get('peak_value'):.2f}, 目标50%: {left.get('target_value'):.2f}")
+            if right.get('peak_value') and right.get('target_value'):
+                peak_info.append(f"右肾峰值: {right.get('peak_value'):.2f}, 目标50%: {right.get('target_value'):.2f}")
+            if peak_info:
+                self.controller.log_message(f"[半排指标] 未达到50%峰值 - {', '.join(peak_info)}")
+                self.controller.log_message("[提示] 半排时间计算需要计数从峰值下降到50%峰值。如果曲线在峰值后保持高位，说明可能没有明显的排泄延迟。")
+
     def update_results(self, result: Dict[str, Any]):
         """在处理完成后，在主线程中更新图像占位符和计数表"""
         
@@ -642,13 +761,15 @@ class DynamicStudyFrame(FeatureFrameBase):
         image_map = {
             'original': result.get('imageUrl'),
             'roi': result.get('overlayUrl'),
-            'curve': result.get('countsTimeUrl')
+            'curve': result.get('countsTimeUrl'),
+            'halfcurve': result.get('halfCurveUrl')
         }
         
         # 关键修改：调用 _load_and_display_image 方法来加载和显示图片
         self._load_and_display_image(self.image_labels['original'], image_map['original'], 'original')
         self._load_and_display_image(self.image_labels['roi'], image_map['roi'], 'roi')
         self._load_and_display_image(self.image_labels['curve'], image_map['curve'], 'curve')
+        self._load_and_display_image(self.image_labels['halfcurve'], image_map['halfcurve'], 'halfcurve')
         
         # --- 2. 更新计数表 ---
         counts = result.get('kidneyCounts', {})
@@ -662,6 +783,8 @@ class DynamicStudyFrame(FeatureFrameBase):
             label.config(text=display_value)
         
         self.controller.log_message("[系统提示] 图像路径和计数表已更新。")
+        # --- 3. 更新半排指标 ---
+        self._update_half_metrics(result.get('halfMetrics'))
 
 
 # -------------------------------------------------------------

@@ -152,10 +152,22 @@ class DicomProcessor:
         print("步骤5: 计算肾脏计数和生成曲线...")
         graph_filename = f"{patient_name}_counts_curve.png"
         graph_path_abs = str(GRAPH_OUTPUT_DIR / graph_filename)
-        left_kidney_count, right_kidney_count, left_background_count, right_background_count, graph_path = graph(
-            dicom_path, 
+        half_graph_filename = f"{patient_name}_half_curve.png"
+        half_graph_path_abs = str(GRAPH_OUTPUT_DIR / half_graph_filename)
+
+        (
+            left_kidney_count,
+            right_kidney_count,
+            left_background_count,
+            right_background_count,
+            graph_path,
+            half_metrics,
+            half_curve_path,
+        ) = graph(
+            dicom_path,
             roi_data,
-            output_path=graph_path_abs 
+            output_path=graph_path_abs,
+            half_output_path=half_graph_path_abs
         )
         
         print(f"左肾计数: {left_kidney_count}, 右肾计数: {right_kidney_count}")
@@ -171,7 +183,9 @@ class DicomProcessor:
             'png_path': png_path,
             'overlay_path': overlay_path,
             'graph_path': graph_path,
-            'kidney_counts': kidney_counts
+            'kidney_counts': kidney_counts,
+            'half_metrics': half_metrics,
+            'half_curve_path': half_curve_path
         }
 
     def process_dynamic_study_dicom(self, dicom_path: str) -> Dict[str, Any]:
@@ -208,7 +222,9 @@ class DicomProcessor:
                 'overlayUrl': result['overlay_path'],
                 'countsTimeUrl': result['graph_path'],
                 'patientInfo': patient_info,
-                'kidneyCounts': result['kidney_counts']
+                'kidneyCounts': result['kidney_counts'],
+                'halfMetrics': result.get('half_metrics'),
+                'halfCurveUrl': result.get('half_curve_path')
             }
                 
         except Exception as e:
