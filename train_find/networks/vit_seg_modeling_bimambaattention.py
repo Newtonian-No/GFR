@@ -30,7 +30,7 @@ from os.path import join as pjoin
 import torch
 import torch.nn as nn
 import numpy as np
-
+import torch.utils.checkpoint as checkpoint
 from torch.nn import CrossEntropyLoss, Dropout, Softmax, Linear, Conv2d, LayerNorm
 from torch.nn.modules.utils import _pair
 from scipy import ndimage
@@ -335,7 +335,15 @@ class Encoder(nn.Module):
     def forward(self, hidden_states):
         attn_weights = []
         for layer_block in self.layer:
-            hidden_states, weights = layer_block(hidden_states)
+            if self.training: # 通常只在训练模式下开启 Checkpointing
+                hidden_states, weights = checkpoint.checkpoint(
+                    layer_block, 
+                    hidden_states, 
+                    use_reentrant=False # 推荐的现代设置
+                )
+            else:
+                # 评估或可视化时不使用 checkpointing (速度更快)
+                hidden_states, weights = layer_block(hidden_states)
             if self.vis:
                 attn_weights.append(weights)
         encoded = self.encoder_norm(hidden_states)
