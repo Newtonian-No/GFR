@@ -18,6 +18,6 @@ export NCCL_DEBUG=INFO
 torchrun --nproc_per_node=$NUM_GPUS --master_port=29505 \
     -m train_find.train \
     --root_path '/home/cu01/Code/GFR/train_find/datasets/GFR/' \
-    --batch_size 8 \
+    --batch_size 4 \
     --max_epochs 100 \
     --output_dir './results_ddp'

@@ -13,6 +13,7 @@ from torch.utils.data.distributed import DistributedSampler
 import torch.backends.cudnn as cudnn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torch.cuda.amp import GradScaler, autocast
 from datetime import datetime
 
 # 引入自定义的数据集和模型
@@ -89,6 +90,8 @@ def trainer(args, model, snapshot_path, train_sampler):
     optimizer = optim.SGD(model.parameters(), lr=args.base_lr, momentum=0.9, weight_decay=0.0001)
     criterion = torch.nn.CrossEntropyLoss()
     
+    scaler = GradScaler()
+
     model.train()
     
     if args.rank == 0:
@@ -104,7 +107,17 @@ def trainer(args, model, snapshot_path, train_sampler):
             # 使用 non_blocking=True 可以稍微加速数据传输
             image_batch, label_batch = image_batch.cuda(args.gpu, non_blocking=True), label_batch.cuda(args.gpu, non_blocking=True)
             
+            with autocast():
+                # 注意：这里我们使用 autocast 来执行 FP16 
+                # 大部分操作，可以大幅降低内存占用
+                outputs = model(image_batch)
+                loss = criterion(outputs, label_batch)
+
             optimizer.zero_grad()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
             outputs = model(image_batch)
             
             loss = criterion(outputs, label_batch)
