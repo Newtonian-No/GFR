@@ -74,8 +74,12 @@ class DicomGFRApp:
         # ------------------------------------
 
         # --- 滚动容器，防止内容超出屏幕 ---
-        self.main_canvas = tk.Canvas(master, highlightthickness=0)
-        self.scrollbar = ttk.Scrollbar(master, orient="vertical", command=self.main_canvas.yview)
+        # 创建一个容器 Frame 来包含 canvas 和 scrollbar（水平排列）
+        canvas_container = ttk.Frame(master)
+        canvas_container.pack(side="top", fill="both", expand=True)
+        
+        self.main_canvas = tk.Canvas(canvas_container, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(canvas_container, orient="vertical", command=self.main_canvas.yview)
         self.main_canvas.configure(yscrollcommand=self.scrollbar.set)
         self.scrollbar.pack(side="right", fill="y")
         self.main_canvas.pack(side="left", fill="both", expand=True)
@@ -117,7 +121,7 @@ class DicomGFRApp:
         self.main_container.grid_columnconfigure(0, weight=1)
 
         # 底部日志和状态区 (保持在主窗口底部)
-        self.create_log_status_area(self.scrollable_frame)
+        self.create_log_status_area(self.master)
 
         # 显示主菜单
         self.show_frame("MainMenu")
@@ -143,7 +147,7 @@ class DicomGFRApp:
     def create_log_status_area(self, parent):
         """创建通用的日志和状态显示区"""
         log_frame = ttk.LabelFrame(parent, text="操作日志与状态结果:", padding=(10, 5))
-        log_frame.pack(fill="x", padx=10, pady=(0, 10))
+        log_frame.pack(side="bottom", fill="x", padx=10, pady=(0, 10))
 
         # 1. 创建内容框架，使用 Grid 实现左右布局
         content_frame = ttk.Frame(log_frame)
