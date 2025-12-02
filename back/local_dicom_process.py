@@ -171,6 +171,8 @@ class DicomProcessor:
         )
         
         print(f"左肾计数: {left_kidney_count}, 右肾计数: {right_kidney_count}")
+        print(f"左本底的像素值之和: {left_background_count}")
+        print(f"右本底的像素值之和: {right_background_count}")
         
         kidney_counts = {
             'leftKidneyCount': int(left_kidney_count),

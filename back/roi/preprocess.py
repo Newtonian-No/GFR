@@ -132,16 +132,32 @@ def resample_dicom(input_path, output_png_path=None ,order=1):
     window_width = getattr(ds, 'WindowWidth', None)
     
     # 如果是列表，取第一个元素
+    # if isinstance(window_center, (list, tuple)):
+    #     window_center = window_center[0]
+    # if isinstance(window_width, (list, tuple)):
+    #     window_width = window_width[0]
+    # if hasattr(window_center, '__getitem__'):
+    #     window_center = window_center[0]
+    # if hasattr(window_width, '__getitem__'):
+    #     window_width = window_width[0]
+
     if isinstance(window_center, (list, tuple)):
         window_center = window_center[0]
     if isinstance(window_width, (list, tuple)):
         window_width = window_width[0]
-    if hasattr(window_center, '__getitem__'):
-        window_center = window_center[0]
-    if hasattr(window_width, '__getitem__'):
-        window_width = window_width[0]
 
-    # 如果存在窗宽窗位，按照窗宽窗位调整像素值
+    if hasattr(window_center, '__getitem__'):
+        try:
+            window_center = window_center[0]
+        except (IndexError, TypeError):
+            pass # 可能是单个值但支持索引，忽略
+    if hasattr(window_width, '__getitem__'):
+        try:
+            window_width = window_width[0]
+        except (IndexError, TypeError):
+            pass # 可能是单个值但支持索引，忽略
+
+    # 如果
     if window_center is not None and window_width is not None:
         min_value = window_center - window_width / 2
         max_value = window_center + window_width / 2
