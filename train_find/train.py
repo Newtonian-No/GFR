@@ -78,7 +78,7 @@ def trainer(args, model, snapshot_path, train_sampler):
         args.db_train, 
         batch_size=args.batch_size, 
         shuffle=False, 
-        num_workers=4, 
+        num_workers=1, 
         pin_memory=True, 
         sampler=train_sampler
     )
