@@ -10,9 +10,8 @@ from torch.utils.data import DataLoader, Dataset
 from back.networks.vit_seg_modeling_bimambaattention import VisionTransformer as ViT_seg
 from back.networks.vit_seg_modeling import CONFIGS as CONFIGS_ViT_seg
 import pydicom
-from scipy.ndimage.interpolation import zoom
+from scipy.ndimage import zoom
 import SimpleITK as sitk
-
 
 class SingleImageDataset(Dataset):
     def __init__(self, image_path, transform=None):
@@ -169,9 +168,9 @@ def segment_kidney(image_path, model_path, img_size=224, num_classes=3):
         prediction = test_single_volume1(image, net, classes=num_classes, 
                                       patch_size=[img_size, img_size],
                                       test_save_path=output_dir, case=case_name, z_spacing=1, device=device)
-        
+        result_path = os.path.join(output_dir, f"{case_name}_pred.nii.gz")
         segmentation = np.squeeze(prediction)
-        print("步骤3.5: 修正分割掩码方向...")
+        print("步骤3.5: 调整掩码尺寸以匹配重采样DICOM...")
         # 强制转换为 2D 数组 (H, W)
         if segmentation.ndim == 1:
             try:
@@ -179,18 +178,40 @@ def segment_kidney(image_path, model_path, img_size=224, num_classes=3):
                 segmentation = segmentation.reshape((img_size, img_size))
                 print(f"警告: 1D 数组已重塑为 2D: {segmentation.shape}")
             except ValueError:
-                print(f"严重错误: 数组维度为 1D 且无法重塑为 {img_size}x{img_size}。跳过旋转。")
-                # 如果无法重塑，则无法进行旋转/镜像，直接使用原始数组
+                print(f"严重错误: 数组维度为 1D 且无法重塑为 {img_size}x{img_size}。跳过调整。")
+                # 如果无法重塑，则无法进行缩放，直接使用原始数组
                 final_segmentation = segmentation
         if segmentation.ndim >= 2:
-            print(f"步骤3.6: 旋转/镜像分割掩码...")
-            segmentation_rotated = np.rot90(segmentation, k=3)
-            final_segmentation = np.flip(segmentation_rotated, axis=0)
+            final_segmentation = segmentation.astype(np.int16)
         else:
         # 如果不是 2D 或更高维（比如重塑失败后仍是 1D），则保持原样
             final_segmentation = segmentation
-        
-        result_path = os.path.join(output_dir, f"{case_name}_pred.nii.gz")
+
+        # 将掩码缩放到与重采样 DICOM 相同的空间尺寸，避免后续叠加错位
+        try:
+            ds_display = pydicom.dcmread(image_path, force=True)
+            target_h, target_w = ds_display.pixel_array.shape
+            if final_segmentation.shape != (target_h, target_w):
+                scale = (target_h / final_segmentation.shape[0], target_w / final_segmentation.shape[1])
+                final_segmentation = zoom(final_segmentation, scale, order=0)
+                print(f"掩码已缩放到显示尺寸: {final_segmentation.shape}")
+
+            # 固定的全局方向修正：先水平镜像，再 rot90(k=1)
+            final_segmentation = np.fliplr(final_segmentation)
+            final_segmentation = np.rot90(final_segmentation, k=1)
+            print("已应用固定方向修正：fliplr + rot90(k=1)")
+
+            try:
+                prd_itk = sitk.GetImageFromArray(final_segmentation.astype(np.float32))
+                spacing = getattr(ds_display, "PixelSpacing", [1.0, 1.0])
+                if isinstance(spacing, (list, tuple)) and len(spacing) == 2:
+                    prd_itk.SetSpacing((float(spacing[0]), float(spacing[1]), 1.0))
+                sitk.WriteImage(prd_itk, result_path)
+                print(f"已覆盖保存调整后的掩码: {result_path}")
+            except Exception as e:
+                print(f"警告: 保存调整后掩码失败，继续使用内存结果。错误: {e}")
+        except Exception as e:
+            print(f"警告: 缩放掩码到显示尺寸时出错，保持原尺寸。错误: {e}")
         print(f"分割结果路径: {result_path}")
     
         return result_path, final_segmentation
