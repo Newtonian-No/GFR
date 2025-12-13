@@ -16,3 +16,4 @@ back/weights/
 *.tar.gz
 *.spec
 model_snapshots/
+validation_analysis_results/
