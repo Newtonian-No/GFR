@@ -20,7 +20,7 @@ from datetime import datetime
 # 注意：必须以模块方式运行 (-m) 才能解析相对导入
 from .dataloader import GFRDataset
 from .networks.vit_seg_configs import get_r50_l16_config
-from .networks.vit_seg_modeling_combine import VisionTransformer as TransUnet
+from .networks.vit_seg_modeling_Emamba import VisionTransformer as TransUnet
 
 def get_args():
     parser = argparse.ArgumentParser(description="Train TransUNet with BiMamba")
