@@ -16,7 +16,7 @@ MODEL_PATH_RELATIVE2 = 'back/weights/best.pt'
 DETECT_MODEL_WEIGHTS_PATH = PROJECT_ROOT / MODEL_PATH_RELATIVE2
 # MODEL_PATH_RELATIVE3 = 'back/weights/best_epoch_weights.pth'
 # LOCAL_DICOM_MODEL_PATH = PROJECT_ROOT / MODEL_PATH_RELATIVE3
-MODEL_PATH_RELATIVE4 = 'back/weights/results_single_gpu/epoch_last.pth'
+MODEL_PATH_RELATIVE4 = 'back/weights/best_epoch_weights.pth'
 LOCAL_DICOM_MODEL_PATH = PROJECT_ROOT / MODEL_PATH_RELATIVE4
 
 MODEL_PATH_RELATIVE4 = 'back/weights/best.pt'  #yolo13，这里还在用旧的

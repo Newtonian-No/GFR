@@ -7,7 +7,7 @@ import torch
 import torch.backends.cudnn as cudnn
 from torch.utils.data import DataLoader, Dataset
 #from back.networks.vit_seg_modeling_mamba import VisionTransformer as ViT_seg
-from back.networks.vit_seg_modeling_bimambaattention import VisionTransformer as ViT_seg
+from back.networks.vit_seg_modeling_mamba import VisionTransformer as ViT_seg
 from back.networks.vit_seg_modeling import CONFIGS as CONFIGS_ViT_seg
 import pydicom
 from scipy.ndimage import zoom
