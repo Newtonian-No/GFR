@@ -17,8 +17,11 @@ pyinstaller -D -c back/better_app.py --name GFR_App \
     --hidden-import "PIL.PngImagePlugin"
 
 #  Windows
-pyinstaller -D -w back/better_app.py --name GFR_App `
+pyinstaller -D -w back/app.py --name GFR_App `
         --collect-all back `
+        --exclude-module back.validate ` 
+        --exclude-module back.batch_process `
+        --exclude-module back.utils `
         --collect-all pillow `
         --collect-data ultralytics `
         --add-data "./back/weights:back/weights" `
