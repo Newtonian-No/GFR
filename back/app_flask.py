@@ -10,6 +10,7 @@ from flask import Flask, render_template, request, jsonify, send_file, send_from
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import threading
+import numpy as np
 
 from back.local_dicom_process import DicomProcessor
 from back.constants import ALL_OUTPUT_DIRS, OUTPUT_DIR
@@ -39,6 +40,46 @@ ALLOWED_EXTENSIONS = {'dcm', 'dicom'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+def convert_numpy_types(obj):
+    """
+    递归地将 NumPy 类型转换为 Python 原生类型，以便 JSON 序列化
+    支持: np.integer, np.floating, np.ndarray, np.bool_, np.complex 等
+    """
+    # NumPy 整数类型 (包括 uint8, uint16, uint32, uint64, int8, int16, int32, int64 等)
+    if isinstance(obj, (np.integer, np.uint8, np.uint16, np.uint32, np.uint64,
+                       np.int8, np.int16, np.int32, np.int64)):
+        return int(obj)
+    # NumPy 浮点类型 (包括 float16, float32, float64 等)
+    elif isinstance(obj, (np.floating, np.float16, np.float32, np.float64)):
+        return float(obj)
+    # NumPy 布尔类型
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    # NumPy 数组
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    # NumPy 复数类型
+    elif isinstance(obj, np.complexfloating):
+        return complex(obj)
+    # 字典类型 - 递归处理
+    elif isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    # 列表和元组类型 - 递归处理
+    elif isinstance(obj, (list, tuple)):
+        return [convert_numpy_types(item) for item in obj]
+    # Python 原生类型 - 直接返回
+    elif isinstance(obj, (bool, type(None), str, int, float)):
+        return obj
+    else:
+        # 对于其他类型，尝试转换为字符串
+        try:
+            # 检查是否是 NumPy 类型（通过检查是否有 item() 方法）
+            if hasattr(obj, 'item'):
+                return obj.item()
+            return str(obj)
+        except:
+            return obj
+
 # ====================================================================
 # 路由定义
 # ====================================================================
@@ -59,6 +100,8 @@ def get_status():
             'kidney_counts': processor.last_kidney_counts,
             'kidney_depths': processor.kidney_depths
         }
+        # 转换 NumPy 类型为 Python 原生类型
+        status = convert_numpy_types(status)
         return jsonify({'success': True, 'data': status})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -115,6 +158,9 @@ def upload_dynamic_study():
             
             result['imageUrls'] = output_paths
         
+        # 转换 NumPy 类型为 Python 原生类型
+        result = convert_numpy_types(result)
+        
         return jsonify(result)
     except Exception as e:
         traceback.print_exc()
@@ -161,6 +207,9 @@ def upload_ct_depth():
             
             result['imageUrls'] = output_paths
         
+        # 转换 NumPy 类型为 Python 原生类型
+        result = convert_numpy_types(result)
+        
         return jsonify(result)
     except Exception as e:
         traceback.print_exc()
@@ -196,6 +245,13 @@ def upload_depth_manual():
             sex_cn=sex
         )
         
+        # 返回完整肾脏深度
+        if result.get('success'):
+            result['kidney_depths'] = convert_numpy_types(processor.kidney_depths)
+        
+        # 转换 NumPy 类型为 Python 原生类型
+        result = convert_numpy_types(result)
+        
         return jsonify(result)
     except Exception as e:
         traceback.print_exc()
@@ -206,6 +262,8 @@ def calculate_gfr():
     """计算 GFR"""
     try:
         result = processor.calculate_gfr()
+        # 转换 NumPy 类型为 Python 原生类型
+        result = convert_numpy_types(result)
         return jsonify(result)
     except Exception as e:
         traceback.print_exc()

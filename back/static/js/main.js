@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeNavigation();
     initializeFileUploads();
     initializeButtons();
+    initializeLogResizer();
     getStatus();
 });
 
@@ -342,6 +343,12 @@ async function uploadManualDepth() {
 
         if (result.success) {
             logMessage('[上传成功] 深度信息已上传，李氏深度计算完成', 'success');
+            // 显示计算后的肾脏深度数据（与源程序一致）
+            const depths = result.kidney_depths || {};
+            logMessage('[肾脏深度 kidney_depths] leftDepth: ' + (depths.leftDepth != null ? depths.leftDepth + ' mm' : 'N/A') +
+                ', rightDepth: ' + (depths.rightDepth != null ? depths.rightDepth + ' mm' : 'N/A') +
+                ', LiLeftKidneyDepth: ' + (depths.LiLeftKidneyDepth != null ? depths.LiLeftKidneyDepth.toFixed(2) + ' mm' : 'N/A') +
+                ', LiRightKidneyDepth: ' + (depths.LiRightKidneyDepth != null ? depths.LiRightKidneyDepth.toFixed(2) + ' mm' : 'N/A'), 'success');
             closeManualDialog();
             getStatus();
         } else {
@@ -612,5 +619,98 @@ function clearLog() {
         logContent.innerHTML = '';
         logMessage('日志已清空', 'info');
     }
+}
+
+// ====================================================================
+// 日志面板高度调整功能
+// ====================================================================
+
+function initializeLogResizer() {
+    const resizer = document.getElementById('log-resizer');
+    const logPanel = document.getElementById('log-panel');
+    const logHeader = logPanel.querySelector('.log-header');
+    
+    if (!resizer || !logPanel) return;
+    
+    let isResizing = false;
+    let startY = 0;
+    let startHeight = 0;
+    const headerHeight = logHeader.offsetHeight;
+    const minHeight = headerHeight + 60; // 最小高度：标题高度 + 60px内容区域
+    const maxHeight = window.innerHeight - 100; // 最大高度：视窗高度 - 100px
+    
+    resizer.addEventListener('mousedown', function(e) {
+        isResizing = true;
+        startY = e.clientY;
+        startHeight = logPanel.offsetHeight;
+        document.body.style.cursor = 'ns-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+    
+    document.addEventListener('mousemove', function(e) {
+        if (!isResizing) return;
+        
+        const deltaY = startY - e.clientY; // 向上拖拽是正数
+        let newHeight = startHeight + deltaY;
+        
+        // 限制高度范围
+        if (newHeight < minHeight) {
+            newHeight = minHeight;
+        } else if (newHeight > maxHeight) {
+            newHeight = maxHeight;
+        }
+        
+        // 更新面板高度
+        logPanel.style.height = newHeight + 'px';
+        document.documentElement.style.setProperty('--log-panel-height', newHeight + 'px');
+        
+        // 更新主容器的底部 padding
+        const mainContainer = document.querySelector('.main-container');
+        if (mainContainer) {
+            mainContainer.style.paddingBottom = (newHeight + 32) + 'px';
+        }
+    });
+    
+    document.addEventListener('mouseup', function() {
+        if (isResizing) {
+            isResizing = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            
+            // 保存高度到 localStorage
+            const currentHeight = logPanel.offsetHeight;
+            localStorage.setItem('logPanelHeight', currentHeight);
+        }
+    });
+    
+    // 从 localStorage 恢复高度
+    const savedHeight = localStorage.getItem('logPanelHeight');
+    if (savedHeight) {
+        const height = parseInt(savedHeight);
+        if (height >= minHeight && height <= maxHeight) {
+            logPanel.style.height = height + 'px';
+            document.documentElement.style.setProperty('--log-panel-height', height + 'px');
+            const mainContainer = document.querySelector('.main-container');
+            if (mainContainer) {
+                mainContainer.style.paddingBottom = (height + 32) + 'px';
+            }
+        }
+    }
+    
+    // 窗口大小改变时调整最大高度
+    window.addEventListener('resize', function() {
+        const currentHeight = logPanel.offsetHeight;
+        const newMaxHeight = window.innerHeight - 100;
+        
+        if (currentHeight > newMaxHeight) {
+            logPanel.style.height = newMaxHeight + 'px';
+            document.documentElement.style.setProperty('--log-panel-height', newMaxHeight + 'px');
+            const mainContainer = document.querySelector('.main-container');
+            if (mainContainer) {
+                mainContainer.style.paddingBottom = (newMaxHeight + 32) + 'px';
+            }
+        }
+    });
 }
 

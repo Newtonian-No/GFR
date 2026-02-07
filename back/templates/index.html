@@ -217,8 +217,8 @@
                 <div class="upload-box" id="ct-upload-box">
                     <i class="fas fa-cloud-upload-alt"></i>
                     <p>点击或拖拽文件到此处上传</p>
-                    <p class="upload-hint">支持 .dcm, .dicom 格式或文件夹</p>
-                    <input type="file" id="ct-file-input" accept=".dcm,.dicom" style="display: none;" webkitdirectory>
+                    <p class="upload-hint">支持 .dcm, .dicom 格式</p>
+                    <input type="file" id="ct-file-input" accept=".dcm,.dicom" style="display: none;">
                 </div>
                 <div class="file-info" id="ct-file-info" style="display: none;">
                     <i class="fas fa-file-medical"></i>
@@ -398,7 +398,7 @@
     </div>
 
     <!-- 日志面板 -->
-    <div class="log-panel">
+    <div class="log-panel" id="log-panel">
         <div class="log-header">
             <h4><i class="fas fa-terminal"></i> 操作日志与状态结果</h4>
             <div class="log-actions">
@@ -413,6 +413,7 @@
                 </button>
             </div>
         </div>
+        <div class="log-resizer" id="log-resizer"></div>
         <div class="log-content" id="log-content"></div>
     </div>
 
