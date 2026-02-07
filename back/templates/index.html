@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DICOM GFR 计算工具</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="nav-container">
+            <div class="nav-brand">
+                <i class="fas fa-heartbeat"></i>
+                <span>DICOM GFR 计算工具</span>
+            </div>
+            <div class="nav-menu">
+                <button class="nav-btn active" data-page="home">
+                    <i class="fas fa-home"></i> 首页
+                </button>
+                <button class="nav-btn" data-page="dynamic">
+                    <i class="fas fa-vial"></i> 肾动态显像
+                </button>
+                <button class="nav-btn" data-page="ct">
+                    <i class="fas fa-x-ray"></i> CT 深度计算
+                </button>
+                <button class="nav-btn" data-page="gfr">
+                    <i class="fas fa-calculator"></i> GFR 计算
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容区 -->
+    <main class="main-container">
+        <!-- 首页 -->
+        <div id="page-home" class="page active">
+            <div class="welcome-section">
+                <h1><i class="fas fa-stethoscope"></i> 欢迎使用 DICOM GFR 计算工具</h1>
+                <p class="subtitle">专业的肾小球滤过率计算系统</p>
+                
+                <div class="feature-cards">
+                    <div class="feature-card" data-page="dynamic">
+                        <div class="card-icon">
+                            <i class="fas fa-vial"></i>
+                        </div>
+                        <h3>处理肾动态显像</h3>
+                        <p>上传 DICOM 格式的肾动态显像数据，自动提取信息并计算肾脏和背景的放射性计数</p>
+                        <button class="card-btn">开始处理</button>
+                    </div>
+                    
+                    <div class="feature-card" data-page="ct">
+                        <div class="card-icon">
+                            <i class="fas fa-x-ray"></i>
+                        </div>
+                        <h3>处理 CT 深度</h3>
+                        <p>上传 CT 图像 DICOM 文件，使用 AI 模型和李氏公式计算肾脏深度</p>
+                        <button class="card-btn">开始处理</button>
+                    </div>
+                    
+                    <div class="feature-card" data-page="manual">
+                        <div class="card-icon">
+                            <i class="fas fa-edit"></i>
+                        </div>
+                        <h3>手动上传信息</h3>
+                        <p>手动输入肾脏深度和患者信息，计算李氏深度</p>
+                        <button class="card-btn">开始输入</button>
+                    </div>
+                    
+                    <div class="feature-card" data-page="gfr">
+                        <div class="card-icon">
+                            <i class="fas fa-calculator"></i>
+                        </div>
+                        <h3>计算 GFR</h3>
+                        <p>基于处理结果计算肾小球滤过率（GFR）</p>
+                        <button class="card-btn">开始计算</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 肾动态显像处理页面 -->
+        <div id="page-dynamic" class="page">
+            <div class="page-header">
+                <h2><i class="fas fa-vial"></i> 处理肾动态显像 DICOM</h2>
+                <p class="page-description">上传 DICOM 格式的肾动态显像文件进行处理</p>
+            </div>
+
+            <div class="upload-section">
+                <div class="upload-box" id="dynamic-upload-box">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <p>点击或拖拽文件到此处上传</p>
+                    <p class="upload-hint">支持 .dcm, .dicom 格式</p>
+                    <input type="file" id="dynamic-file-input" accept=".dcm,.dicom" style="display: none;">
+                </div>
+                <div class="file-info" id="dynamic-file-info" style="display: none;">
+                    <i class="fas fa-file-medical"></i>
+                    <span id="dynamic-file-name"></span>
+                    <button class="btn-remove" onclick="clearFile('dynamic')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="action-section">
+                <button class="btn-primary" id="btn-process-dynamic" disabled>
+                    <i class="fas fa-play"></i> 开始处理
+                </button>
+                <button class="btn-secondary" onclick="showManualDialog()">
+                    <i class="fas fa-edit"></i> 手动上传深度/患者信息
+                </button>
+            </div>
+
+            <div class="results-section" id="dynamic-results" style="display: none;">
+                <h3><i class="fas fa-chart-line"></i> 处理结果</h3>
+                
+                <div class="results-grid">
+                    <div class="result-panel">
+                        <h4>原始肾动态显像</h4>
+                        <div class="image-container">
+                            <img id="dynamic-original" src="" alt="原始图像" style="display: none;">
+                            <div class="image-placeholder">暂无图像</div>
+                        </div>
+                    </div>
+                    
+                    <div class="result-panel">
+                        <h4>肾脏计数变化曲线</h4>
+                        <div class="image-container">
+                            <img id="dynamic-curve" src="" alt="曲线图" style="display: none;">
+                            <div class="image-placeholder">暂无图像</div>
+                        </div>
+                    </div>
+                    
+                    <div class="result-panel">
+                        <h4>ROI 勾画结果</h4>
+                        <div class="image-container">
+                            <img id="dynamic-roi" src="" alt="ROI结果" style="display: none;">
+                            <div class="image-placeholder">暂无图像</div>
+                        </div>
+                    </div>
+                    
+                    <div class="result-panel">
+                        <h4>半排率/半排时间曲线</h4>
+                        <div class="image-container">
+                            <img id="dynamic-halfcurve" src="" alt="半排曲线" style="display: none;">
+                            <div class="image-placeholder">暂无图像</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="data-table">
+                    <h4>肾脏放射性计数表</h4>
+                    <table id="dynamic-counts-table">
+                        <thead>
+                            <tr>
+                                <th>指标</th>
+                                <th>左肾</th>
+                                <th>右肾</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>肾脏放射性计数</td>
+                                <td id="left-kidney-count">N/A</td>
+                                <td id="right-kidney-count">N/A</td>
+                            </tr>
+                            <tr>
+                                <td>背景放射性计数</td>
+                                <td id="left-bg-count">N/A</td>
+                                <td id="right-bg-count">N/A</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="data-table">
+                    <h4>半排指标</h4>
+                    <table id="dynamic-half-metrics">
+                        <thead>
+                            <tr>
+                                <th>指标</th>
+                                <th>左肾</th>
+                                <th>右肾</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>半排时间 (min)</td>
+                                <td id="left-half-time">N/A</td>
+                                <td id="right-half-time">N/A</td>
+                            </tr>
+                            <tr>
+                                <td>半排率 (1/min)</td>
+                                <td id="left-half-rate">N/A</td>
+                                <td id="right-half-rate">N/A</td>
+                            </tr>
+                            <tr>
+                                <td>是否达到50%</td>
+                                <td id="left-half-reached">N/A</td>
+                                <td id="right-half-reached">N/A</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- CT 深度计算页面 -->
+        <div id="page-ct" class="page">
+            <div class="page-header">
+                <h2><i class="fas fa-x-ray"></i> 处理 CT 深度计算</h2>
+                <p class="page-description">上传 CT 序列文件夹或单个包含深度信息的 DICOM 文件</p>
+            </div>
+
+            <div class="upload-section">
+                <div class="upload-box" id="ct-upload-box">
+                    <i class="fas fa-cloud-upload-alt"></i>
+                    <p>点击或拖拽文件到此处上传</p>
+                    <p class="upload-hint">支持 .dcm, .dicom 格式或文件夹</p>
+                    <input type="file" id="ct-file-input" accept=".dcm,.dicom" style="display: none;" webkitdirectory>
+                </div>
+                <div class="file-info" id="ct-file-info" style="display: none;">
+                    <i class="fas fa-file-medical"></i>
+                    <span id="ct-file-name"></span>
+                    <button class="btn-remove" onclick="clearFile('ct')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="action-section">
+                <button class="btn-primary" id="btn-process-ct" disabled>
+                    <i class="fas fa-play"></i> 开始处理
+                </button>
+                <button class="btn-secondary" onclick="showManualDialog()">
+                    <i class="fas fa-edit"></i> 手动上传深度/患者信息
+                </button>
+            </div>
+
+            <div class="results-section" id="ct-results" style="display: none;">
+                <h3><i class="fas fa-chart-line"></i> 处理结果</h3>
+                
+                <div class="results-grid">
+                    <div class="result-panel">
+                        <h4>肾脏 CT/最深切片 (原图)</h4>
+                        <div class="image-container">
+                            <img id="ct-original" src="" alt="原始CT" style="display: none;">
+                            <div class="image-placeholder">暂无图像</div>
+                        </div>
+                    </div>
+                    
+                    <div class="result-panel">
+                        <h4>深度识别叠加结果 (标注图)</h4>
+                        <div class="image-container">
+                            <img id="ct-overlay" src="" alt="叠加结果" style="display: none;">
+                            <div class="image-placeholder">暂无图像</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="data-table">
+                    <h4>肾脏深度计算表</h4>
+                    <table id="ct-depth-table">
+                        <thead>
+                            <tr>
+                                <th>指标</th>
+                                <th>左肾</th>
+                                <th>右肾</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>模型深度 (mm)</td>
+                                <td id="model-left-depth">N/A</td>
+                                <td id="model-right-depth">N/A</td>
+                            </tr>
+                            <tr>
+                                <td>李氏深度 (mm)</td>
+                                <td id="li-left-depth">N/A</td>
+                                <td id="li-right-depth">N/A</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- GFR 计算页面 -->
+        <div id="page-gfr" class="page">
+            <div class="page-header">
+                <h2><i class="fas fa-calculator"></i> 计算 GFR</h2>
+                <p class="page-description">请确保肾动态数据、深度信息（通过CT或手动上传）已准备就绪</p>
+            </div>
+
+            <div class="info-box" style="background: #e7f3ff; border-left: 4px solid #0078D7; padding: 1rem; margin-bottom: 2rem; border-radius: 4px;">
+                <h4 style="margin: 0 0 0.5rem 0; color: #0078D7;">
+                    <i class="fas fa-info-circle"></i> 使用说明
+                </h4>
+                <ol style="margin: 0; padding-left: 1.5rem; color: #333;">
+                    <li>首先处理<strong>肾动态显像</strong>，获取厂商信息和肾脏计数数据</li>
+                    <li>然后处理<strong>CT 深度</strong>或<strong>手动上传深度信息</strong>，获取深度数据</li>
+                    <li>最后点击"开始计算 GFR"按钮进行计算</li>
+                </ol>
+            </div>
+
+            <div class="action-section">
+                <button class="btn-primary" id="btn-calculate-gfr">
+                    <i class="fas fa-calculator"></i> 开始计算 GFR
+                </button>
+                <button class="btn-secondary" onclick="showManualDialog()">
+                    <i class="fas fa-edit"></i> 手动上传深度/患者信息
+                </button>
+            </div>
+
+            <div class="results-section" id="gfr-results" style="display: none;">
+                <h3><i class="fas fa-chart-bar"></i> GFR 计算结果</h3>
+                
+                <div class="data-table">
+                    <h4>肾小球滤过率 (GFR) 计算结果 (ml/min)</h4>
+                    <table id="gfr-table">
+                        <thead>
+                            <tr>
+                                <th>指标</th>
+                                <th>左肾 GFR</th>
+                                <th>右肾 GFR</th>
+                                <th>总 GFR</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>基于模型深度 GFR</td>
+                                <td id="left-gfr">N/A</td>
+                                <td id="right-gfr">N/A</td>
+                                <td id="total-gfr" class="highlight">N/A</td>
+                            </tr>
+                            <tr>
+                                <td>基于李氏深度 GFR</td>
+                                <td id="li-left-gfr">N/A</td>
+                                <td id="li-right-gfr">N/A</td>
+                                <td id="li-total-gfr" class="highlight">N/A</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 手动上传对话框 -->
+    <div id="manual-dialog" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-edit"></i> 手动上传肾脏深度及患者信息</h3>
+                <button class="modal-close" onclick="closeManualDialog()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="manual-form">
+                    <div class="form-group">
+                        <label>左肾深度 (mm) <span class="optional">(可选)</span></label>
+                        <input type="number" id="left-depth" step="0.01" placeholder="请输入左肾深度">
+                    </div>
+                    <div class="form-group">
+                        <label>右肾深度 (mm) <span class="optional">(可选)</span></label>
+                        <input type="number" id="right-depth" step="0.01" placeholder="请输入右肾深度">
+                    </div>
+                    <div class="form-group">
+                        <label>身高 (米) <span class="required">*</span></label>
+                        <input type="number" id="height" step="0.01" placeholder="例如: 1.75" required>
+                    </div>
+                    <div class="form-group">
+                        <label>体重 (公斤) <span class="required">*</span></label>
+                        <input type="number" id="weight" step="0.01" placeholder="例如: 70.0" required>
+                    </div>
+                    <div class="form-group">
+                        <label>年龄 (岁) <span class="required">*</span></label>
+                        <input type="number" id="age" placeholder="例如: 50" required>
+                    </div>
+                    <div class="form-group">
+                        <label>性别 <span class="required">*</span></label>
+                        <select id="sex" required>
+                            <option value="">请选择</option>
+                            <option value="男">男</option>
+                            <option value="女">女</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="closeManualDialog()">取消</button>
+                <button class="btn-primary" onclick="submitManualForm()">
+                    <i class="fas fa-check"></i> 确认上传并计算李氏深度
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 日志面板 -->
+    <div class="log-panel">
+        <div class="log-header">
+            <h4><i class="fas fa-terminal"></i> 操作日志与状态结果</h4>
+            <div class="log-actions">
+                <button class="btn-small" onclick="getStatus()">
+                    <i class="fas fa-info-circle"></i> 查看状态
+                </button>
+                <button class="btn-small" onclick="resetProcessor()">
+                    <i class="fas fa-redo"></i> 重置状态
+                </button>
+                <button class="btn-small" onclick="clearLog()">
+                    <i class="fas fa-trash"></i> 清空日志
+                </button>
+            </div>
+        </div>
+        <div class="log-content" id="log-content"></div>
+    </div>
+
+    <!-- 加载遮罩 -->
+    <div id="loading-overlay" class="loading-overlay" style="display: none;">
+        <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>处理中，请稍候...</p>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
+
