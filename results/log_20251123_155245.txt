@@ -1,4 +1,0 @@
-[15:52:45.065] Training started. Logs saved to results/log_20251123_155245.txt
-[15:52:45.065] Args: Namespace(root_path='datasets/GFR/', output_dir='results/', max_epochs=100, batch_size=8, base_lr=0.01, img_size=224, seed=1234, num_classes=3, save_interval=20, n_gpu=1, deterministic=1)
-[15:52:45.065] Initializing Model...
-[15:52:49.388] Loading data from datasets/GFR/

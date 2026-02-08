@@ -1,6 +1,0 @@
-[15:57:35.752] Training started. Logs saved to results/log_20251123_155735.txt
-[15:57:35.752] Args: Namespace(root_path='/home/kevin/Code/ROI/train_find/datasets/GFR/', output_dir='results/', max_epochs=100, batch_size=8, base_lr=0.01, img_size=224, seed=1234, num_classes=3, save_interval=20, n_gpu=1, deterministic=1)
-[15:57:35.752] Initializing Model...
-[15:57:40.234] Loading data from /home/kevin/Code/ROI/train_find/datasets/GFR/
-[15:57:40.235] Train dataset length: 279
-[15:57:40.239] Start training: Total epochs: 100, Batch size: 8

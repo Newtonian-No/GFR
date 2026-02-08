@@ -17,3 +17,7 @@ back/weights/
 *.spec
 model_snapshots/
 validation_analysis_results/
+*.csv
+*.xlsx
+*.xlsx#
+validation_results/

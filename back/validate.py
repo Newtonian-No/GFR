@@ -1,143 +1,137 @@
-import argparse
-import logging
 import os
-import shutil
 import csv
+import traceback
 import numpy as np
-import torch  # 修复之前的 NameError
-import pydicom
-from datetime import datetime
-from tqdm import tqdm
+import SimpleITK as sitk
 from pathlib import Path
 
-# --- 导入软件原有的预处理和分析模块 ---
-# 确保这些模块在你的 PYTHONPATH 中
-from back.roi.preprocess import extract_frame, resample_dicom 
-from back.roi.predict import segment_kidney 
-from back.roi.ROI import add_background_roi
-from back.roi.graph import graph
+# 导入你的处理类和工具函数
+from back.local_dicom_process import DicomProcessor
+from back.utils import calculate_metric_percase  # 确保路径正确
 
-def run_validation(args):
-    # 1. 环境准备与设备检查
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-    
-    # --- 关键修复：预先创建软件逻辑依赖的输出目录 ---
-    # 软件中的 resample_dicom 似乎硬编码或依赖于这些路径
-    required_dirs = [
-        'output',
-        'output/resampled_dcm',
-        'output/converted_png',
-        'output/segmentation',     # <--- 修复你当前报错的关键
-        'output/segmented_nii',    # 预防下一个可能的报错
-        'output/graph_results',
-        'output/ROI',
-        args.output_dir
-    ]
-    for d in required_dirs:
-        os.makedirs(d, exist_ok=True)
-        print(f"目录已就绪: {d}")
+def load_nifti_as_array(file_path):
+    """读取 nii.gz 文件并返回 numpy 数组"""
+    img = sitk.ReadImage(str(file_path))
+    return sitk.GetArrayFromImage(img)
 
-    output_base = Path(args.output_dir)
+def batch_validate_with_metrics(test_dir: str, output_csv: str):
+    """
+    批量处理 test 文件夹，包含 images 和 labels 子文件夹
+    计算计数信息以及分割指标 (Dice, HD95 等)
+    """
+    processor = DicomProcessor()
     
-    # 2. 获取 DICOM 文件列表
-    dcm_files = sorted([f for f in os.listdir(args.data_dir) if f.endswith('.dcm')])
-    if not dcm_files:
-        print(f"错误: 在 {args.data_dir} 中未找到 .dcm 文件")
+    test_path = Path(test_dir)
+    images_dir = test_path / "images"
+    labels_dir = test_path / "labels"
+    
+    if not images_dir.exists() or not labels_dir.exists():
+        print(f"错误: 确保 {test_dir} 下存在 'images' 和 'labels' 文件夹")
         return
 
-    analysis_results = []
+    # 准备 CSV 表头
+    # 假设 utils.calculate_metric_percase 返回的是 [Dice, HD95]
+    headers = [
+        "Patient Name", "LK Count", "RK Count", "LBG Count", "RBG Count", 
+        "Dice_Mean", "HD95_Mean", "Status", "File Name"
+    ]
     
-    # 3. 循环处理
-    for filename in tqdm(dcm_files, desc="批量验证进度"):
-        dicom_path = os.path.join(args.data_dir, filename)
-        patient_name = Path(filename).stem
+    results = []
+    dicom_files = list(images_dir.glob('*.dcm'))
+    print(f"找到 {len(dicom_files)} 个测试病例，开始验证...")
+
+    for dcm_path in dicom_files:
+        case_id = dcm_path.stem  # 获取文件名（不带扩展名）作为匹配 ID
+        print(f"正在处理: {case_id}")
         
+        # 1. 寻找对应的金标准标签文件 (假设是 .nii.gz 格式)
+        possible_label_names = [
+            f"{case_id}.nii",
+            f"{case_id}.nii.gz",
+            f"{case_id}_label.nii",
+            f"{case_id}_label.nii.gz"
+        ]
+        
+        label_path = None
+        for name in possible_label_names:
+            p = labels_dir / name
+            if p.exists():
+                label_path = p
+                break
+        
+        row = {
+            "Patient Name": "N/A", "LK Count": 0, "RK Count": 0, 
+            "LBG Count": 0, "RBG Count": 0, "Dice_Mean": 0, 
+            "HD95_Mean": 0, "Status": "Label Missing", "File Name": dcm_path.name
+        }
+
+        if not label_path.exists():
+            print(f"警告: 未找到 {case_id} 对应的标签文件，跳过指标计算")
+            results.append(row)
+            continue
+
         try:
-            # 步骤 1: 检查并提取多帧
-            dcm_data = pydicom.dcmread(dicom_path)
-            is_multiframe = dcm_data.get('NumberOfFrames', 1) > 1
+            # 2. 调用 DicomProcessor 运行模型推理并获取计数
+            # process_dynamic_study_dicom 会生成预测文件到 SEGMENTED_OUTPUT_DIR
+            res = processor.process_dynamic_study_dicom(str(dcm_path))
             
-            if is_multiframe:
-                # 调用软件的 extract_frame
-                original_dcm_working, _ = extract_frame(dicom_path, args.target_frame_index)
+            if res.get('success'):
+                p_info = res.get('patientInfo', {})
+                k_counts = res.get('kidneyCounts', {})
+                
+                # 更新基础信息
+                row.update({
+                    "Patient Name": p_info.get('name', 'Unknown'),
+                    "LK Count": k_counts.get('leftKidneyCount', 0),
+                    "RK Count": k_counts.get('rightKidneyCount', 0),
+                    "LBG Count": k_counts.get('leftBackgroundCount', 0),
+                    "RBG Count": k_counts.get('rightBackgroundCount', 0),
+                })
+
+                # 3. 加载预测结果和金标准进行指标对比
+                # 预测结果路径通常在你的 constants 定义的 SEGMENTED_OUTPUT_DIR 下
+                pred_file_path = Path(res.get('segmentedFilePath', "")) # 确保 processor 返回了这个路径
+                
+                if pred_file_path.exists():
+                    pred_arr = load_nifti_as_array(pred_file_path)
+                    gt_arr = load_nifti_as_array(label_path)
+                    
+                    # 确保数据是二值的 (0 或 1)
+                    pred_arr = (pred_arr > 0).astype(np.uint8)
+                    gt_arr = (gt_arr > 0).astype(np.uint8)
+
+                    # 调用 utils 中的函数计算指标
+                    # 注意：如果你的模型是多分类（左肾、右肾），需要分别计算
+                    metrics = calculate_metric_percase(pred_arr, gt_arr)
+                    
+                    row["Dice_Mean"] = round(metrics[0], 4)
+                    row["HD95_Mean"] = round(metrics[1], 4)
+                    row["Status"] = "Success"
+                else:
+                    row["Status"] = "Prediction File Not Found"
             else:
-                original_dcm_working = dicom_path
-
-            # 步骤 2: 重采样 (这里会自动保存到 output/resampled_dcm/)
-            # 软件逻辑会读取保存后的结果，所以我们必须确保路径存在
-            png_output_path = f"output/converted_png/{patient_name}_resampled.png"
-            
-            # 调用软件函数
-            resampled_dcm_path, _, _ = resample_dicom(
-                original_dcm_working, 
-                output_png_path=png_output_path, 
-                order=1
-            )
-
-            # 步骤 3 & 4: 分割与 ROI 提取
-            # 直接调用 predict.py 里的函数，保证预处理和模型加载完全一致
-            segmentation_path, _ = segment_kidney(
-                resampled_dcm_path, 
-                args.model_path, 
-                img_size=args.img_size, 
-                num_classes=args.num_classes
-            )
-            
-            roi_path, roi_data = add_background_roi(segmentation_path)
-
-            # 步骤 5: 绘图与分析 (graph 函数)
-            graph_out = str(output_base / f"{patient_name}_counts.png")
-            half_out = str(output_base / f"{patient_name}_half.png")
-
-            res_tuple = graph(
-                dicom_path, # 曲线计算通常使用原始多帧序列
-                roi_data,
-                output_path=graph_out,
-                half_output_path=half_out
-            )
-            
-            lk, rk, lbg, rbg, _, half_metrics, _ = res_tuple
-
-            # --- 安全提取半衰期数据 (防止 NoneType 报错) ---
-            l_t = "N/A"
-            r_t = "N/A"
-            if half_metrics and isinstance(half_metrics, dict):
-                left_info = half_metrics.get('left')
-                right_info = half_metrics.get('right')
-                if left_info: l_t = f"{left_info.get('t_half', 'N/A')}"
-                if right_info: r_t = f"{right_info.get('t_half', 'N/A')}"
-
-            analysis_results.append([
-                patient_name, f"{lk:.2f}", f"{rk:.2f}", 
-                f"{lbg:.2f}", f"{rbg:.2f}", l_t, r_t, "SUCCESS"
-            ])
+                row["Status"] = f"Processing Failed: {res.get('message')}"
 
         except Exception as e:
-            logging.error(f"处理失败 {patient_name}: {str(e)}")
-            analysis_results.append([patient_name, "N/A", "N/A", "N/A", "N/A", "N/A", "N/A", f"ERROR: {e}"])
+            traceback.print_exc()
+            row["Status"] = f"Error: {str(e)}"
+            
+        results.append(row)
 
-    # 4. 生成 CSV 报告
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-    csv_report = output_base / f"validation_report_{timestamp}.csv"
+    # 4. 写入 CSV
+    with open(output_csv, mode='w', newline='', encoding='utf-8-sig') as f:
+        writer = csv.DictWriter(f, fieldnames=headers)
+        writer.writeheader()
+        writer.writerows(results)
     
-    with open(csv_report, 'w', newline='', encoding='utf-8-sig') as f:
-        writer = csv.writer(f)
-        writer.writerow(["Patient Name", "LK Count", "RK Count", "LBG Count", "RBG Count", "L T1/2", "R T1/2", "Status"])
-        writer.writerows(analysis_results)
-
-    print(f"\n验证完成！CSV 结果保存在: {csv_report}")
+    print(f"\n验证完成！结果已保存至: {output_csv}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', type=str, default='/home/kevin/Documents/GFR/200例像素值-放射性计数拟合数据/200kidneycounts_RESAMPLE/images/')
-    parser.add_argument('--model_path', type=str, default='/home/kevin/Code/ROI/back/weights/best_epoch_weights.pth')
-    parser.add_argument('--output_dir', type=str, default='validation_results')
-    parser.add_argument('--target_frame_index', type=int, default=61)
-    parser.add_argument('--img_size', type=int, default=224)
-    parser.add_argument('--num_classes', type=int, default=3)
+    # 这里的 test 文件夹结构应为:
+    # test/
+    #   ├── images/ (存放 .dcm)
+    #   └── labels/ (存放 .nii.gz)
+    TEST_DATA_DIR = "/media/kevin/3167F095163AC0C3/GFR/整理的数据集/肾动态显像/原始数据/GFR/test/" 
+    OUTPUT_REPORT = "model_validation_report.csv"
     
-    args = parser.parse_args()
-    run_validation(args)
-
-
+    batch_validate_with_metrics(TEST_DATA_DIR, OUTPUT_REPORT)
