@@ -5,6 +5,7 @@ Flask Web 应用 - DICOM GFR 计算工具
 import os
 import json
 import traceback
+import time
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
@@ -168,26 +169,43 @@ def upload_dynamic_study():
 
 @app.route('/api/upload/ct', methods=['POST'])
 def upload_ct_depth():
-    """上传并处理 CT 深度 DICOM 文件"""
+    """上传并处理 CT 深度 DICOM 文件（支持单个文件或整个文件夹）"""
     try:
-        if 'file' not in request.files:
-            return jsonify({'success': False, 'message': '没有上传文件'}), 400
-        
-        file = request.files['file']
-        if file.filename == '':
-            return jsonify({'success': False, 'message': '文件名为空'}), 400
-        
-        if not allowed_file(file.filename):
-            return jsonify({'success': False, 'message': '不支持的文件格式'}), 400
-        
-        # 保存文件
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
-        
-        # 处理文件
+        upload_folder = Path(app.config['UPLOAD_FOLDER'])
+        filepath = None
+
+        # 方式一：多个文件（文件夹上传）
+        files = request.files.getlist('files')
+        if files and any(f and f.filename for f in files):
+            # 过滤出有效的 DICOM 文件
+            valid_files = [f for f in files if f and f.filename and allowed_file(f.filename)]
+            if not valid_files:
+                return jsonify({'success': False, 'message': '未包含有效的 .dcm 或 .dicom 文件'}), 400
+            # 创建唯一子目录保存文件夹内所有文件
+            folder_name = f"ct_folder_{int(time.time() * 1000)}"
+            target_dir = upload_folder / folder_name
+            target_dir.mkdir(parents=True, exist_ok=True)
+            for f in valid_files:
+                name = secure_filename(f.filename) or f"file_{valid_files.index(f)}.dcm"
+                f.save(str(target_dir / name))
+            filepath = str(target_dir)
+
+        # 方式二：单个文件
+        if filepath is None:
+            if 'file' not in request.files:
+                return jsonify({'success': False, 'message': '请选择单个文件或整个文件夹上传'}), 400
+            file = request.files['file']
+            if not file or file.filename == '':
+                return jsonify({'success': False, 'message': '文件名为空'}), 400
+            if not allowed_file(file.filename):
+                return jsonify({'success': False, 'message': '不支持的文件格式，请使用 .dcm 或 .dicom'}), 400
+            filename = secure_filename(file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(filepath)
+
+        # 统一处理（文件或文件夹路径）
         result = processor.process_depth_and_li_depth(filepath)
-        
+
         # 转换路径为 URL 可访问的路径
         if result.get('success'):
             output_paths = {}
@@ -200,16 +218,27 @@ def upload_ct_depth():
                                 rel_path = path.relative_to(OUTPUT_DIR)
                                 output_paths[key] = f'/output/{rel_path.as_posix()}'
                             except ValueError:
-                                # 如果路径不在 OUTPUT_DIR 下，使用绝对路径的最后一个部分
                                 output_paths[key] = f'/output/{path.name}'
                     except Exception as e:
                         print(f"路径转换错误 {key}: {e}")
-            
             result['imageUrls'] = output_paths
-        
-        # 转换 NumPy 类型为 Python 原生类型
+            # 多切片结果：为前端左右切换提供每张的 URL
+            if result.get('allSliceResults'):
+                for item in result['allSliceResults']:
+                    for key in ['originalPngPath', 'overlayPngPath']:
+                        if item.get(key):
+                            try:
+                                path = Path(item[key])
+                                if path.exists():
+                                    try:
+                                        rel_path = path.relative_to(OUTPUT_DIR)
+                                        item[key] = f'/output/{rel_path.as_posix()}'
+                                    except ValueError:
+                                        item[key] = f'/output/{path.name}'
+                            except Exception:
+                                pass
+
         result = convert_numpy_types(result)
-        
         return jsonify(result)
     except Exception as e:
         traceback.print_exc()
