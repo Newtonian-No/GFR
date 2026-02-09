@@ -10,6 +10,10 @@ let currentFile = {
     dynamic: null,
     ct: null
 };
+// CT 多结果切换：当前展示的切片索引与主结果（用于李氏深度等）
+let ctResultsList = [];
+let ctResultIndex = 0;
+let ctMainResult = null;
 
 // ====================================================================
 // 页面初始化
@@ -74,6 +78,16 @@ function showPage(pageName) {
         const homeBtn = document.querySelector('.nav-btn[data-page="home"]');
         if (homeBtn) homeBtn.classList.add('active');
     }
+    // CT 页：隐藏或显示左右切换箭头
+    const al = document.getElementById('ct-arrow-left');
+    const ar = document.getElementById('ct-arrow-right');
+    if (pageName !== 'ct') {
+        if (al) al.style.display = 'none';
+        if (ar) ar.style.display = 'none';
+    } else if (ctResultsList.length > 1) {
+        if (al) { al.style.display = 'flex'; al.disabled = ctResultIndex <= 0; }
+        if (ar) { ar.style.display = 'flex'; ar.disabled = ctResultIndex >= ctResultsList.length - 1; }
+    }
 
     logMessage(`[系统提示] 已切换到: ${pageName}`, 'info');
 }
@@ -92,14 +106,19 @@ function initializeFileUploads() {
     dynamicUploadBox.addEventListener('drop', (e) => handleDrop(e, 'dynamic'));
     dynamicFileInput.addEventListener('change', (e) => handleFileSelect(e, 'dynamic'));
 
-    // CT 深度上传
+    // CT 深度上传：同一上传区，两个入口——选择文件（可进文件夹选单/多文件）、选择文件夹
     const ctUploadBox = document.getElementById('ct-upload-box');
     const ctFileInput = document.getElementById('ct-file-input');
+    const ctFolderInput = document.getElementById('ct-folder-input');
+    const ctBtnFile = document.getElementById('ct-btn-file');
+    const ctBtnFolder = document.getElementById('ct-btn-folder');
 
-    ctUploadBox.addEventListener('click', () => ctFileInput.click());
     ctUploadBox.addEventListener('dragover', handleDragOver);
     ctUploadBox.addEventListener('drop', (e) => handleDrop(e, 'ct'));
-    ctFileInput.addEventListener('change', (e) => handleFileSelect(e, 'ct'));
+    ctFileInput.addEventListener('change', (e) => handleFileSelectCtFile(e));
+    ctFolderInput.addEventListener('change', (e) => handleFileSelectCtFolder(e));
+    if (ctBtnFile) ctBtnFile.addEventListener('click', (e) => { e.stopPropagation(); ctFileInput.click(); });
+    if (ctBtnFolder) ctBtnFolder.addEventListener('click', (e) => { e.stopPropagation(); ctFolderInput.click(); });
 }
 
 function handleDragOver(e) {
@@ -115,66 +134,93 @@ function handleDrop(e, type) {
     e.currentTarget.style.borderColor = '';
     e.currentTarget.style.background = '';
 
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) return;
+    if (type === 'ct' && files.length > 1) {
+        var allowed = files.filter(f => /\.(dcm|dicom)$/i.test(f.name || ''));
+        if (allowed.length > 0) handleFiles(allowed, 'ct');
+        else showError('请拖拽 .dcm 或 .dicom 文件');
+    } else {
         handleFile(files[0], type);
     }
 }
 
 function handleFileSelect(e, type) {
     const files = e.target.files;
-    if (files.length > 0) {
-        handleFile(files[0], type);
+    if (!files || files.length === 0) return;
+    if (type === 'dynamic') {
+        handleFile(files[0], 'dynamic');
     }
 }
 
+function handleFileSelectCtFile(e) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    var list = Array.from(files).filter(f => /\.(dcm|dicom)$/i.test(f.name || ''));
+    if (list.length === 0) {
+        showError('请选择 .dcm 或 .dicom 文件');
+        return;
+    }
+    if (list.length === 1) handleFile(list[0], 'ct');
+    else handleFiles(list, 'ct');
+}
+
+function handleFileSelectCtFolder(e) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    var list = Array.from(files).filter(f => /\.(dcm|dicom)$/i.test(f.name || ''));
+    if (list.length > 0) handleFiles(list, 'ct');
+    else showError('该文件夹内未找到 .dcm 或 .dicom 文件');
+}
+
 function handleFile(file, type) {
-    // 验证文件类型
     const allowedExtensions = ['.dcm', '.dicom'];
-    const fileExtension = '.' + file.name.split('.').pop().toLowerCase();
-    
+    const fileExtension = '.' + (file.name || '').split('.').pop().toLowerCase();
     if (!allowedExtensions.includes(fileExtension)) {
         showError('不支持的文件格式，请上传 .dcm 或 .dicom 文件');
         return;
     }
-
     currentFile[type] = file;
     displayFileInfo(file, type);
-    
-    // 启用处理按钮
     const processBtn = document.getElementById(`btn-process-${type}`);
-    if (processBtn) {
-        processBtn.disabled = false;
-    }
-
+    if (processBtn) processBtn.disabled = false;
     logMessage(`[文件选择] 已选择文件: ${file.name}`, 'success');
+}
+
+function handleFiles(files, type) {
+    if (type !== 'ct' || !files.length) return;
+    currentFile[type] = files;
+    displayFileInfo(files, type);
+    const processBtn = document.getElementById('btn-process-ct');
+    if (processBtn) processBtn.disabled = false;
+    logMessage(`[文件选择] 已选择文件夹，共 ${files.length} 个 DICOM 文件`, 'success');
 }
 
 function displayFileInfo(file, type) {
     const uploadBox = document.getElementById(`${type}-upload-box`);
     const fileInfo = document.getElementById(`${type}-file-info`);
     const fileName = document.getElementById(`${type}-file-name`);
-
-    if (uploadBox) uploadBox.style.display = 'none';
-    if (fileInfo) fileInfo.style.display = 'flex';
-    if (fileName) fileName.textContent = file.name;
+    if (!uploadBox || !fileInfo || !fileName) return;
+    uploadBox.style.display = 'none';
+    fileInfo.style.display = 'flex';
+    fileName.textContent = Array.isArray(file)
+        ? (file.length === 1 ? '已选择 1 个文件' : `已选择 ${file.length} 个文件（来自文件夹）`)
+        : (file.name || '');
 }
 
 function clearFile(type) {
     currentFile[type] = null;
-    
     const uploadBox = document.getElementById(`${type}-upload-box`);
     const fileInfo = document.getElementById(`${type}-file-info`);
     const fileInput = document.getElementById(`${type}-file-input`);
-
+    const folderInput = type === 'ct' ? document.getElementById('ct-folder-input') : null;
     if (uploadBox) uploadBox.style.display = 'block';
     if (fileInfo) fileInfo.style.display = 'none';
     if (fileInput) fileInput.value = '';
-
+    if (folderInput) folderInput.value = '';
     const processBtn = document.getElementById(`btn-process-${type}`);
     if (processBtn) processBtn.disabled = true;
-
-    logMessage(`[文件清除] 已清除 ${type} 文件`, 'info');
+    logMessage(`[文件清除] 已清除 ${type} 选择`, 'info');
 }
 
 // ====================================================================
@@ -239,7 +285,7 @@ async function processDynamicStudy() {
 
 async function processCTDepth() {
     if (!currentFile.ct) {
-        showError('请先选择文件');
+        showError('请先选择单个文件或整个文件夹');
         return;
     }
 
@@ -248,7 +294,11 @@ async function processCTDepth() {
 
     try {
         const formData = new FormData();
-        formData.append('file', currentFile.ct);
+        if (Array.isArray(currentFile.ct)) {
+            currentFile.ct.forEach(f => formData.append('files', f));
+        } else {
+            formData.append('file', currentFile.ct);
+        }
 
         const response = await fetch('/api/upload/ct', {
             method: 'POST',
@@ -259,7 +309,18 @@ async function processCTDepth() {
 
         if (result.success) {
             logMessage('[处理成功] CT 深度处理完成', 'success');
-            displayCTResults(result);
+            ctMainResult = result;
+            ctResultsList = result.allSliceResults && result.allSliceResults.length > 0
+                ? result.allSliceResults
+                : [{
+                    originalPngPath: (result.imageUrls && result.imageUrls.originalPngPath) || result.originalPngPath,
+                    overlayPngPath: (result.imageUrls && result.imageUrls.overlayPngPath) || result.overlayPngPath,
+                    leftDepth: result.modelLeftDepth,
+                    rightDepth: result.modelRightDepth,
+                    sliceName: result.deepestSliceName || ''
+                }];
+            ctResultIndex = 0;
+            displayCTResults();
         } else {
             showError(result.message || '处理失败');
             logMessage(`[处理失败] ${result.message}`, 'error');
@@ -436,20 +497,57 @@ function displayDynamicResults(result) {
     }
 }
 
-function displayCTResults(result) {
+function displayCTResults() {
     const resultsSection = document.getElementById('ct-results');
-    if (resultsSection) resultsSection.style.display = 'block';
+    const navWrap = document.getElementById('ct-result-nav');
+    if (!resultsSection) return;
+    resultsSection.style.display = 'block';
 
-    // 显示图像
-    const imageUrls = result.imageUrls || {};
-    displayImage('ct-original', imageUrls.originalPngPath);
-    displayImage('ct-overlay', imageUrls.overlayPngPath);
+    if (ctResultsList.length === 0) return;
+    const item = ctResultsList[ctResultIndex];
+    const main = ctMainResult || {};
 
-    // 显示深度数据
-    updateTableCell('model-left-depth', formatValue(result.modelLeftDepth, ' mm'));
-    updateTableCell('model-right-depth', formatValue(result.modelRightDepth, ' mm'));
-    updateTableCell('li-left-depth', formatValue(result.LiLeftDepth, ' mm'));
-    updateTableCell('li-right-depth', formatValue(result.LiRightDepth, ' mm'));
+    // 显示当前切片图像（allSliceResults 里已是 URL）
+    displayImage('ct-original', item.originalPngPath);
+    displayImage('ct-overlay', item.overlayPngPath);
+
+    // 显示当前切片深度
+    updateTableCell('model-left-depth', formatValue(item.leftDepth, ' mm'));
+    updateTableCell('model-right-depth', formatValue(item.rightDepth, ' mm'));
+    updateTableCell('li-left-depth', formatValue(main.LiLeftDepth, ' mm'));
+    updateTableCell('li-right-depth', formatValue(main.LiRightDepth, ' mm'));
+
+    // 多张时显示页面左右箭头与计数
+    const showNav = ctResultsList.length > 1;
+    const arrowLeft = document.getElementById('ct-arrow-left');
+    const arrowRight = document.getElementById('ct-arrow-right');
+    if (arrowLeft) {
+        arrowLeft.style.display = showNav ? 'flex' : 'none';
+        arrowLeft.disabled = ctResultIndex <= 0;
+    }
+    if (arrowRight) {
+        arrowRight.style.display = showNav ? 'flex' : 'none';
+        arrowRight.disabled = ctResultIndex >= ctResultsList.length - 1;
+    }
+    if (navWrap) {
+        navWrap.style.display = showNav ? 'flex' : 'none';
+        const countText = document.getElementById('ct-result-count');
+        if (countText) countText.textContent = `第 ${ctResultIndex + 1} / ${ctResultsList.length} 张`;
+    }
+}
+
+function ctResultPrev() {
+    if (ctResultIndex > 0) {
+        ctResultIndex--;
+        displayCTResults();
+    }
+}
+
+function ctResultNext() {
+    if (ctResultIndex < ctResultsList.length - 1) {
+        ctResultIndex++;
+        displayCTResults();
+    }
 }
 
 function displayGFRResults(gfrData) {

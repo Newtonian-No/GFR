@@ -55,7 +55,7 @@
                             <i class="fas fa-x-ray"></i>
                         </div>
                         <h3>处理 CT 深度</h3>
-                        <p>上传 CT 图像 DICOM 文件，使用 AI 模型和李氏公式计算肾脏深度</p>
+                        <p>上传单个 CT DICOM 文件或整个 CT 序列文件夹，使用 AI 模型和李氏公式计算肾脏深度</p>
                         <button class="card-btn">开始处理</button>
                     </div>
                     
@@ -210,15 +210,24 @@
         <div id="page-ct" class="page">
             <div class="page-header">
                 <h2><i class="fas fa-x-ray"></i> 处理 CT 深度计算</h2>
-                <p class="page-description">上传 CT 序列文件夹或单个包含深度信息的 DICOM 文件</p>
+                <p class="page-description">上传单个 CT DICOM 文件或整个 CT 序列文件夹，用于计算肾脏深度</p>
             </div>
 
             <div class="upload-section">
                 <div class="upload-box" id="ct-upload-box">
                     <i class="fas fa-cloud-upload-alt"></i>
-                    <p>点击或拖拽文件到此处上传</p>
-                    <p class="upload-hint">支持 .dcm, .dicom 格式</p>
+                    <p>点击或拖拽到此处上传</p>
+                    <p class="upload-hint">支持 .dcm、.dicom 格式；可<strong>选择单个文件</strong>或<strong>选择文件夹</strong></p>
+                    <div class="upload-actions" style="margin-top: 0.75rem; display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+                        <button type="button" class="btn-small" id="ct-btn-file" title="在对话框中可双击进入文件夹后选择单个或多个文件">
+                            <i class="fas fa-file"></i> 选择文件
+                        </button>
+                        <button type="button" class="btn-small" id="ct-btn-folder" title="选择整个文件夹上传">
+                            <i class="fas fa-folder-open"></i> 选择文件夹
+                        </button>
+                    </div>
                     <input type="file" id="ct-file-input" accept=".dcm,.dicom" style="display: none;">
+                    <input type="file" id="ct-folder-input" webkitdirectory directory style="display: none;">
                 </div>
                 <div class="file-info" id="ct-file-info" style="display: none;">
                     <i class="fas fa-file-medical"></i>
@@ -238,21 +247,30 @@
                 </button>
             </div>
 
-            <div class="results-section" id="ct-results" style="display: none;">
+            <div class="results-section ct-results-wrap" id="ct-results" style="display: none;">
+                <!-- 左侧箭头：多张时显示 -->
+                <button type="button" id="ct-arrow-left" class="ct-page-arrow ct-arrow-left" onclick="ctResultPrev()" style="display: none;" aria-label="上一张">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                <!-- 右侧箭头：多张时显示 -->
+                <button type="button" id="ct-arrow-right" class="ct-page-arrow ct-arrow-right" onclick="ctResultNext()" style="display: none;" aria-label="下一张">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
                 <h3><i class="fas fa-chart-line"></i> 处理结果</h3>
-                
-                <div class="results-grid">
+                <div id="ct-result-nav" class="ct-result-nav" style="display: none; align-items: center; justify-content: center; gap: 1rem; margin-bottom: 1rem;">
+                    <span id="ct-result-count" class="ct-result-count">第 1 / 1 张</span>
+                </div>
+                <div class="results-grid ct-results-grid">
                     <div class="result-panel">
                         <h4>肾脏 CT/最深切片 (原图)</h4>
-                        <div class="image-container">
+                        <div class="image-container image-container-ct">
                             <img id="ct-original" src="" alt="原始CT" style="display: none;">
                             <div class="image-placeholder">暂无图像</div>
                         </div>
                     </div>
-                    
                     <div class="result-panel">
                         <h4>深度识别叠加结果 (标注图)</h4>
-                        <div class="image-container">
+                        <div class="image-container image-container-ct">
                             <img id="ct-overlay" src="" alt="叠加结果" style="display: none;">
                             <div class="image-placeholder">暂无图像</div>
                         </div>

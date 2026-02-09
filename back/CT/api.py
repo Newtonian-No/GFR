@@ -1,7 +1,8 @@
 # api.py
+import json
 import shutil
 from pathlib import Path
-from typing import Dict, Any, Union
+from typing import Dict, Any, Union, List
 import cv2
 import pydicom
 
@@ -60,7 +61,7 @@ def process_single_dcm(dcm_path: Path) -> Dict[str, Any]:
     _dicom_to_png(dcm_path, png_path)
     
     # 4. 构造输出路径
-    overlay_path = OVERLAY_PNG_DIR / f"{dcm_stem}_overlay.png"
+    overlay_path = OVERLAY_PNG_DIR / f"{dcm_stem}_deepest_overlay.png"
 
     return {
         'success': True,
@@ -95,8 +96,35 @@ def process_dcm_series(folder_path: Path) -> Dict[str, Any]:
 
     # 4. 构造输出路径 (最深切片的叠加图已在 find_deepest_slice 中生成)
     overlay_path = OVERLAY_PNG_DIR / f"{dcm_stem}_deepest_overlay.png"
-    # print(f"DEBUG:最深切片PNG路径: {png_path}")
-    # print(f"DEBUG:最深切片叠加图路径: {overlay_path}")
+
+    # 5. 收集所有切片的原图与叠加图，供前端左右切换浏览
+    dicom_files = sorted(folder_path.glob('*.dcm')) + sorted(folder_path.glob('*.dicom'))
+    all_slice_results: List[Dict[str, Any]] = []
+    for dcm_path in dicom_files:
+        stem = dcm_path.stem
+        orig_png = ORIGINAL_PNG_DIR / f"{stem}_original.png"
+        if not orig_png.exists():
+            _dicom_to_png(dcm_path, orig_png)
+        overlay_png = OVERLAY_PNG_DIR / f"{stem}_overlay.png"
+        if not overlay_png.exists():
+            continue
+        depth_json = ANALYSIS_RESULTS_DIR / f"{stem}_results.json"
+        left_d = right_d = 'N/A'
+        if depth_json.exists():
+            try:
+                with open(depth_json, 'r') as f:
+                    d = json.load(f)
+                left_d = d.get('L', 'N/A')
+                right_d = d.get('R', 'N/A')
+            except Exception:
+                pass
+        all_slice_results.append({
+            'sliceName': dcm_path.name,
+            'leftDepth': left_d,
+            'rightDepth': right_d,
+            'originalPngPath': str(orig_png),
+            'overlayPngPath': str(overlay_png),
+        })
 
     return {
         'success': True,
@@ -104,9 +132,10 @@ def process_dcm_series(folder_path: Path) -> Dict[str, Any]:
         'rightDepth': final_result.get('R', 'N/A'),
         'deepestSliceName': deepest_slice_name,
         'maxOverallDepthMm': final_result.get('max_overall_depth_mm', 0.0),
-        'originalPngPath': str(png_path),             # 项目根目录/output/original_png/
-        'overlayPngPath': str(overlay_path),          # 项目根目录/output/overlay_png/
-        'originalDicomPath': str(deepest_dcm_path),   # 项目根目录/output/original_dcm_backup/
+        'originalPngPath': str(png_path),
+        'overlayPngPath': str(overlay_path),
+        'originalDicomPath': str(deepest_dcm_path),
+        'allSliceResults': all_slice_results,
     }
 
 

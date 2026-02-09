@@ -399,6 +399,9 @@ class DicomProcessor:
         if 'deepestSliceName' in model_depth_result:
              final_result['deepestSliceName'] = model_depth_result.get('deepestSliceName')
              final_result['maxOverallDepthMm'] = model_depth_result.get('maxOverallDepthMm')
+        # 多切片列表，供前端左右切换浏览
+        if 'allSliceResults' in model_depth_result and model_depth_result['allSliceResults']:
+             final_result['allSliceResults'] = model_depth_result['allSliceResults']
 
         # 更新 DicomProcessor 的内部状态 (供 GFR 计算使用)
         # 将模型深度存入内部状态，供 calculate_gfr 使用
@@ -581,4 +584,20 @@ class DicomProcessor:
                 'LiTotalGFR': round(Li_GFR_total, 2),
             }
         }
+    
+    def reset_state(self):
+        """
+        重置处理器状态，清空所有内部变量
+        """
+        self.kidney_depths = {
+            'leftDepth': None,
+            'rightDepth': None,
+            'LiLeftKidneyDepth': None,
+            'LiRightKidneyDepth': None
+        }
+        self.last_patient_name = None
+        self.last_manufacturer = None
+        self.last_kidney_counts = {}
+        self.last_patient_info = {}
+        return True
 
