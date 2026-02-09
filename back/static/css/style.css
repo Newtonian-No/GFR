@@ -460,6 +460,55 @@ body {
     object-fit: contain;
 }
 
+/* CT 结果图：尽量占满容器 */
+.image-container-ct {
+    min-height: 380px;
+    height: 45vh;
+}
+.image-container-ct img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+/* CT 结果区左右箭头（整页两侧） */
+.ct-results-wrap {
+    position: relative;
+}
+.ct-page-arrow {
+    position: fixed;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 52px;
+    height: 52px;
+    border-radius: 50%;
+    border: 2px solid var(--primary-color);
+    background: rgba(255, 255, 255, 0.95);
+    color: var(--primary-color);
+    font-size: 1.5rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+    z-index: 100;
+    transition: background 0.2s, color 0.2s;
+}
+.ct-page-arrow:hover:not(:disabled) {
+    background: var(--primary-color);
+    color: white;
+}
+.ct-page-arrow:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+.ct-arrow-left {
+    left: 20px;
+}
+.ct-arrow-right {
+    right: 20px;
+}
+
 .image-placeholder {
     color: var(--text-secondary);
     font-size: 1rem;
