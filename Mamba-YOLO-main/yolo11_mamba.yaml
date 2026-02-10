@@ -1,0 +1,27 @@
+# YOLO11-Mamba Kidney Depth Configuration
+nc: 2  # 类别数：肾脏 (kidney_depth)
+scales: # 模型缩放比例 (基于 n 尺度)
+  n: [0.50, 0.33, 1024] 
+
+backbone:
+  # [from, repeats, module, args]
+  # args 顺序: [out_channels, block_repeats, mlp_ratio, drop_path, d_state, ssm_ratio, scan_mode]
+  - [-1, 1, SimpleStem, [64, 3]]  # 0: 初始下采样
+  - [-1, 2, XSSBlock, [128, 1, 4.0, 0.1, 16, 2.0, 'cross']]   # 1: 十字扫描提取全局特征
+  - [-1, 1, VisionClueMerge, [256]]                           # 2: 下采样
+  - [-1, 2, XSSBlock, [256, 1, 4.0, 0.1, 16, 2.0, 'spiral']]  # 3: 回形扫描捕捉连续组织特征
+  - [-1, 1, VisionClueMerge, [512]]                           # 4: 下采样
+  - [-1, 2, XSSBlock, [512, 1, 4.0, 0.1, 16, 2.0, 'spiral']]  # 5: 深层特征提取
+  - [-1, 1, VisionClueMerge, [1024]]                          # 6: 下采样
+  - [-1, 2, VSSBlock, [1024, 0.1, 16, 2.0, 'cross']]          # 7: 瓶颈层使用十字扫描
+
+head:
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
+  - [[-1, 4], 1, Concat, [1]]  # 特征融合
+  - [-1, 2, XSSBlock, [512, 1, 4.0, 0.1, 16, 2.0, 'bidirectional']] # 8: 检测头前使用双向扫描
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
+  - [[-1, 2], 1, Concat, [1]]
+  - [-1, 2, XSSBlock, [256, 1, 4.0, 0.1, 16, 2.0, 'bidirectional']] # 9
+
+  - [[8, 9], 1, Detect, [nc]] # 最终检测层

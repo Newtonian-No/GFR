@@ -50,8 +50,48 @@ def autopad(k, p=None, d=1):  # kernel, padding, dilation
     return p
 
 
-# Cross Scan
+# ==================== Bidirectional Scan (双向) K=2 ====================
+class BiScan(torch.autograd.Function):
+    """双向扫描: 行方向正序 + 逆序"""
+    @staticmethod
+    def forward(ctx, x: torch.Tensor):
+        B, C, H, W = x.shape
+        ctx.shape = (B, C, H, W)
+        xs = x.new_empty((B, 2, C, H * W))
+        xs[:, 0] = x.flatten(2, 3)  # 正向: 从左到右, 从上到下
+        xs[:, 1] = torch.flip(x.flatten(2, 3), dims=[-1])  # 反向
+        return xs
+
+    @staticmethod
+    def backward(ctx, ys: torch.Tensor):
+        B, C, H, W = ctx.shape
+        L = H * W
+        y = ys[:, 0] + ys[:, 1].flip(dims=[-1])
+        return y.view(B, -1, H, W)
+
+
+class BiMerge(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, ys: torch.Tensor):
+        B, K, D, H, W = ys.shape
+        ctx.shape = (H, W)
+        ys = ys.view(B, K, D, -1)
+        y = ys[:, 0] + ys[:, 1].flip(dims=[-1])
+        return y
+
+    @staticmethod
+    def backward(ctx, x: torch.Tensor):
+        H, W = ctx.shape
+        B, C, L = x.shape
+        xs = x.new_empty((B, 2, C, L))
+        xs[:, 0] = x
+        xs[:, 1] = x.flip(dims=[-1])
+        return xs.view(B, 2, C, H, W), None, None
+
+
+# ==================== Cross Scan (十字) K=4 ====================
 class CrossScan(torch.autograd.Function):
+    """十字扫描: 行/列方向 + 正逆序, 共4方向"""
     @staticmethod
     def forward(ctx, x: torch.Tensor):
         B, C, H, W = x.shape
@@ -96,7 +136,73 @@ class CrossMerge(torch.autograd.Function):
         return xs, None, None
 
 
-# cross selective scan ===============================
+# ==================== Spiral/Ring Scan (回形) K=2 ====================
+class SpiralScan(torch.autograd.Function):
+    """回形扫描: 蛇形(之字形)顺序 - 奇数行反向, 形成回字形遍历"""
+    @staticmethod
+    def forward(ctx, x: torch.Tensor):
+        B, C, H, W = x.shape
+        ctx.shape = (B, C, H, W)
+        
+        # 复制一份以防修改原图
+        x_spiral = x.clone() 
+        # 蛇形变换：奇数行翻转 (Index从0开始，1, 3, 5...行是奇数行)
+        x_spiral[:, :, 1::2, :] = x_spiral[:, :, 1::2, :].flip(dims=[-1])
+        
+        L = H * W
+        xs = x.new_empty((B, 2, C, L))
+        xs[:, 0] = x_spiral.view(B, C, L)
+        xs[:, 1] = torch.flip(xs[:, 0], dims=[-1])
+        return xs
+
+    @staticmethod
+    def backward(ctx, ys: torch.Tensor):
+        B, C, H, W = ctx.shape
+        # 1. 合并两个方向
+        y = ys[:, 0] + ys[:, 1].flip(dims=[-1]) 
+        y = y.view(B, C, H, W)
+        # 2. 逆蛇形变换：把奇数行再翻转回来
+        y[:, :, 1::2, :] = y[:, :, 1::2, :].flip(dims=[-1])
+        return y.contiguous()
+
+
+class SpiralMerge(torch.autograd.Function):
+    """回形 merge: 将蛇形顺序的 SSM 输出还原为行优先, 以配合 view(B,H,W,-1)"""
+    @staticmethod
+    def forward(ctx, ys: torch.Tensor):
+        B, K, D, H, W = ys.shape
+        ctx.shape = (H, W)
+        ys = ys.view(B, K, D, -1)
+        y = ys[:, 0] + ys[:, 1].flip(dims=[-1])  # (B, D, L) 蛇形顺序
+        # 蛇形 -> 行优先, 供后续 view(B,H,W,-1) 使用
+        out = y.new_empty((B, D, H * W))
+        for h in range(H):
+            start = h * W
+            if h % 2 == 0:
+                out[:, :, start:start + W] = y[:, :, start:start + W]
+            else:
+                out[:, :, start:start + W] = y[:, :, start + W - 1:start - 1:-1]
+        return out  # (B, D, L) 行优先
+
+    @staticmethod
+    def backward(ctx, x: torch.Tensor):
+        H, W = ctx.shape
+        B, C, L = x.shape
+        # x 是行优先, 需转为蛇形顺序以匹配 ys
+        y = x.new_empty((B, C, L))
+        for h in range(H):
+            start = h * W
+            if h % 2 == 0:
+                y[:, :, start:start + W] = x[:, :, start:start + W]
+            else:
+                y[:, :, start:start + W] = x[:, :, start + W - 1:start - 1:-1]
+        xs = y.new_empty((B, 2, C, L))
+        xs[:, 0] = y
+        xs[:, 1] = y.flip(dims=[-1])
+        return xs.view(B, 2, C, H, W), None, None
+
+
+# selective scan (support multiple scan modes) ===============================
 class SelectiveScanCore(torch.autograd.Function):
     # comment all checks if inside cross_selective_scan
     @staticmethod
@@ -138,6 +244,79 @@ class SelectiveScanCore(torch.autograd.Function):
         return (du, ddelta, dA, dB, dC, dD, ddelta_bias, None, None, None, None)
 
 
+# Scan mode: 'bidirectional'(K=2), 'cross'(K=4), 'spiral'(K=2)
+SCAN_MODE_MAP = {
+    'bidirectional': ('BiScan', 'BiMerge', 2),
+    'cross': ('CrossScan', 'CrossMerge', 4),
+    'spiral': ('SpiralScan', 'SpiralMerge', 2),
+}
+
+
+def selective_scan_by_mode(
+        x: torch.Tensor,
+        x_proj_weight: torch.Tensor,
+        x_proj_bias: torch.Tensor,
+        dt_projs_weight: torch.Tensor,
+        dt_projs_bias: torch.Tensor,
+        A_logs: torch.Tensor,
+        Ds: torch.Tensor,
+        out_norm: torch.nn.Module,
+        out_norm_shape: str,
+        scan_mode: str = 'cross',
+        nrows: int = -1,
+        backnrows: int = -1,
+        delta_softplus: bool = True,
+        to_dtype: bool = True,
+        force_fp32: bool = False,
+        ssoflex: bool = True,
+        SelectiveScan=None,
+):
+    """支持多种扫描模式的 selective scan: bidirectional/cross/spiral"""
+    scan_name, merge_name, expected_k = SCAN_MODE_MAP.get(scan_mode, ('CrossScan', 'CrossMerge', 4))
+    ScanCls = globals()[scan_name]
+    MergeCls = globals()[merge_name]
+
+    B, D, H, W = x.shape
+    D_dim, N = A_logs.shape
+    K, D_dim, R = dt_projs_weight.shape
+    L = H * W
+
+    def selective_scan_fn(u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=True):
+        return SelectiveScan.apply(u, delta, A, B, C, D, delta_bias, delta_softplus, nrows, backnrows, ssoflex)
+
+    xs = ScanCls.apply(x)
+
+    x_dbl = torch.einsum("b k d l, k c d -> b k c l", xs, x_proj_weight)
+    if x_proj_bias is not None:
+        x_dbl = x_dbl + x_proj_bias.view(1, K, -1, 1)
+    dts, Bs, Cs = torch.split(x_dbl, [R, N, N], dim=2)
+    dts = torch.einsum("b k r l, k d r -> b k d l", dts, dt_projs_weight)
+    xs = xs.view(B, -1, L)
+    dts = dts.contiguous().view(B, -1, L)
+    As = -torch.exp(A_logs.to(torch.float))
+    Bs = Bs.contiguous()
+    Cs = Cs.contiguous()
+    Ds = Ds.to(torch.float)
+    delta_bias = dt_projs_bias.view(-1).to(torch.float)
+
+    if force_fp32:
+        xs = xs.to(torch.float)
+        dts = dts.to(torch.float)
+        Bs = Bs.to(torch.float)
+        Cs = Cs.to(torch.float)
+
+    ys = selective_scan_fn(xs, dts, As, Bs, Cs, Ds, delta_bias, delta_softplus).view(B, K, -1, H, W)
+    y = MergeCls.apply(ys)
+
+    if out_norm_shape in ["v1"]:
+        y = out_norm(y.view(B, -1, H, W)).permute(0, 2, 3, 1)
+    else:
+        y = y.transpose(dim0=1, dim1=2).contiguous()
+        y = out_norm(y).view(B, H, W, -1)
+
+    return (y.to(x.dtype) if to_dtype else y)
+
+
 def cross_selective_scan(
         x: torch.Tensor = None,
         x_proj_weight: torch.Tensor = None,
@@ -148,57 +327,22 @@ def cross_selective_scan(
         Ds: torch.Tensor = None,
         out_norm: torch.nn.Module = None,
         out_norm_shape="v0",
-        nrows=-1,  # for SelectiveScanNRow
-        backnrows=-1,  # for SelectiveScanNRow
+        nrows=-1,
+        backnrows=-1,
         delta_softplus=True,
         to_dtype=True,
-        force_fp32=False,  # False if ssoflex
+        force_fp32=False,
         ssoflex=True,
         SelectiveScan=None,
-        scan_mode_type='default'
+        scan_mode_type='cross',
 ):
-    # out_norm: whatever fits (B, L, C); LayerNorm; Sigmoid; Softmax(dim=1);...
-
-    B, D, H, W = x.shape
-    D, N = A_logs.shape
-    K, D, R = dt_projs_weight.shape
-    L = H * W
-
-    def selective_scan(u, delta, A, B, C, D=None, delta_bias=None, delta_softplus=True):
-        return SelectiveScan.apply(u, delta, A, B, C, D, delta_bias, delta_softplus, nrows, backnrows, ssoflex)
-
-    xs = CrossScan.apply(x)
-
-    x_dbl = torch.einsum("b k d l, k c d -> b k c l", xs, x_proj_weight)
-    if x_proj_bias is not None:
-        x_dbl = x_dbl + x_proj_bias.view(1, K, -1, 1)
-    dts, Bs, Cs = torch.split(x_dbl, [R, N, N], dim=2)
-    dts = torch.einsum("b k r l, k d r -> b k d l", dts, dt_projs_weight)
-    xs = xs.view(B, -1, L)
-    dts = dts.contiguous().view(B, -1, L)
-    # HiPPO matrix
-    As = -torch.exp(A_logs.to(torch.float))  # (k * c, d_state)
-    Bs = Bs.contiguous()
-    Cs = Cs.contiguous()
-    Ds = Ds.to(torch.float)  # (K * c)
-    delta_bias = dt_projs_bias.view(-1).to(torch.float)
-
-    if force_fp32:
-        xs = xs.to(torch.float)
-        dts = dts.to(torch.float)
-        Bs = Bs.to(torch.float)
-        Cs = Cs.to(torch.float)
-
-    ys: torch.Tensor = selective_scan(
-        xs, dts, As, Bs, Cs, Ds, delta_bias, delta_softplus
-    ).view(B, K, -1, H, W)
-
-    y: torch.Tensor = CrossMerge.apply(ys)
-
-    if out_norm_shape in ["v1"]:  # (B, C, H, W)
-        y = out_norm(y.view(B, -1, H, W)).permute(0, 2, 3, 1)  # (B, H, W, C)
-    else:  # (B, L, C)
-        y = y.transpose(dim0=1, dim1=2).contiguous()  # (B, L, C)
-        y = out_norm(y).view(B, H, W, -1)
-
-    return (y.to(x.dtype) if to_dtype else y)
+    """原始接口, 默认十字扫描。scan_mode_type 支持: bidirectional, cross, spiral"""
+    return selective_scan_by_mode(
+        x, x_proj_weight, x_proj_bias, dt_projs_weight, dt_projs_bias,
+        A_logs, Ds, out_norm, out_norm_shape,
+        scan_mode=scan_mode_type,
+        nrows=nrows, backnrows=backnrows,
+        delta_softplus=delta_softplus, to_dtype=to_dtype,
+        force_fp32=force_fp32, ssoflex=ssoflex,
+        SelectiveScan=SelectiveScan,
+    )

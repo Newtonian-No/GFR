@@ -26,4 +26,8 @@ __all__ = (
     "SegmentationModel",
     "ClassificationModel",
     "BaseModel",
+    "VSSBlock", 
+    "SimpleStem", 
+    "VisionClueMerge", 
+    "XSSBlock"
 )

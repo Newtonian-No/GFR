@@ -47,12 +47,13 @@ from ultralytics.nn.modules import (
     ResNetLayer,
     RTDETRDecoder,
     Segment,
-    WorldDetect,
-    SimpleStem,
-    VisionClueMerge,
-    VSSBlock,
-    XSSBlock
+    WorldDetect
+    # SimpleStem,
+    # VisionClueMerge,
+    # VSSBlock,
+    # XSSBlock
 )
+from ultralytics.nn.modules.mamba_yolo import VSSBlock, SimpleStem, VisionClueMerge, XSSBlock
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
 from ultralytics.utils.loss import v8ClassificationLoss, v8DetectionLoss, v8OBBLoss, v8PoseLoss, v8SegmentationLoss

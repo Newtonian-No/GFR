@@ -21,6 +21,7 @@ class SS2D(nn.Module):
             bias=False,
             # ======================
             forward_type="v2",
+            scan_mode='cross',
             **kwargs,
     ):
         """
@@ -33,7 +34,13 @@ class SS2D(nn.Module):
         self.dt_rank = math.ceil(d_model / 16) if dt_rank == "auto" else dt_rank
         self.d_state = math.ceil(d_model / 6) if d_state == "auto" else d_state  # 20240109
         self.d_conv = d_conv
-        self.K = 4
+        self.scan_mode = scan_mode
+        if scan_mode in ['bidirectional', 'spiral']:
+            self.K = 2
+        elif scan_mode == 'cross':
+            self.K = 4
+        else:
+            raise ValueError(f"Unknown scan_mode: {scan_mode}")
 
         # tags for forward_type ==============================
         def checkpostfix(tag, value):
@@ -169,6 +176,7 @@ class SS2D(nn.Module):
             out_norm_shape=getattr(self, "out_norm_shape", "v0"),
             delta_softplus=True, force_fp32=force_fp32,
             SelectiveScan=SelectiveScan, ssoflex=self.training,  # output fp32
+            scan_mode_type=self.scan_mode,
         )
         if self.ssm_low_rank:
             x = self.out_rank(x)
@@ -255,6 +263,7 @@ class XSSBlock(nn.Module):
             ssm_drop_rate: float = 0,
             ssm_init="v0",
             forward_type="v2",
+            scan_mode='cross',
             # =============================
             mlp_act_layer=nn.GELU,
             mlp_drop_rate: float = 0.0,
@@ -281,7 +290,8 @@ class XSSBlock(nn.Module):
                                          act_layer=ssm_act_layer,
                                          d_conv=ssm_conv,
                                          conv_bias=ssm_conv_bias,
-                                         dropout=ssm_drop_rate, ) for _ in range(n)))
+                                         dropout=ssm_drop_rate,
+                                         scan_mode=scan_mode, ) for _ in range(n)))
         self.drop_path = DropPath(drop_path)
         self.lsblock = LSBlock(hidden_dim, hidden_dim)
         self.mlp_branch = mlp_ratio > 0
@@ -320,6 +330,7 @@ class VSSBlock(nn.Module):
             ssm_drop_rate: float = 0,
             ssm_init="v0",
             forward_type="v2",
+            scan_mode='cross',
             # =============================
             mlp_ratio=4.0,
             mlp_act_layer=nn.GELU,
@@ -366,6 +377,7 @@ class VSSBlock(nn.Module):
                 initialize=ssm_init,
                 # ==========================
                 forward_type=forward_type,
+                scan_mode=scan_mode,
             )
 
         self.drop_path = DropPath(drop_path)
